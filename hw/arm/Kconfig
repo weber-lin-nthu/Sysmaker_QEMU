@@ -310,6 +310,12 @@ config STM32VLDISCOVERY
     depends on TCG && ARM
     select STM32F100_SOC
 
+config STM32F429I_DISC1
+    bool
+    default y
+    depends on TCG && ARM
+    select STM32F429_SOC
+
 config STRONGARM
     bool
     select PXA2XX
@@ -458,6 +464,15 @@ config STM32F205_SOC
 
 config STM32F405_SOC
     bool
+    select ARM_V7M
+    select OR_IRQ
+    select STM32F4XX_SYSCFG
+    select STM32F4XX_EXTI
+
+config STM32F429_SOC
+    bool
+    default y
+    depends on TCG && ARM
     select ARM_V7M
     select OR_IRQ
     select STM32F4XX_SYSCFG
