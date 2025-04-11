@@ -41,7 +41,7 @@ static const uint32_t adc_addr[]   = {0x40012000, 0x40012100, 0x40012200,
                                       0x40012300, 0x40012400, 0x40012500};
 static const uint32_t spi_addr[]   = {0x40013000, 0x40003800, 0x40003C00,
                                       0x40013400, 0x40015000, 0x40015400};
-#define EXTI_ADDR 0x40013C00
+#define EXTI_ADDR  0x40013C00
 
 #define SYSCFG_IRQ 71 // ?
 static const int usart_irq[] = {37, 38, 39, 52, 53, 71, 82, 83};
@@ -94,7 +94,7 @@ static void stm32f429_soc_initfn(Object *obj)
     }
 
     for (i = 0; i < STM_NUM_SPIS; i++) {
-        object_initialize_child(obj, "spi[*]", &s->spi[i], TYPE_STM32F2XX_SPI);
+        object_initialize_child(obj, "spi[*]", &s->spi[i], TYPE_STM32F429_SPI);
     }
 
     object_initialize_child(obj, "exti", &s->exti, TYPE_STM32F4XX_EXTI);

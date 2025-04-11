@@ -1,8 +1,7 @@
 /*
  * STM32F429 GPIO (General Purpose Input/Ouput)
  *
- * Copyright (c) 2024 Arnaud Minier <arnaud.minier@telecom-paris.fr>
- * Copyright (c) 2024 Inès Varhol <ines.varhol@telecom-paris.fr>
+ * Copyright (c) {YEAR} {NAME} {EMAIL}
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
@@ -27,18 +26,18 @@
 #include "migration/vmstate.h"
 #include "trace.h"
 
-#define GPIO_MODER 0x00
-#define GPIO_OTYPER 0x04
+#define GPIO_MODER   0x00
+#define GPIO_OTYPER  0x04
 #define GPIO_OSPEEDR 0x08
-#define GPIO_PUPDR 0x0C
-#define GPIO_IDR 0x10
-#define GPIO_ODR 0x14
-#define GPIO_BSRR 0x18
-#define GPIO_LCKR 0x1C
-#define GPIO_AFRL 0x20
-#define GPIO_AFRH 0x24
-#define GPIO_BRR 0x28
-#define GPIO_ASCR 0x2C
+#define GPIO_PUPDR   0x0C
+#define GPIO_IDR     0x10
+#define GPIO_ODR     0x14
+#define GPIO_BSRR    0x18
+#define GPIO_LCKR    0x1C
+#define GPIO_AFRL    0x20
+#define GPIO_AFRH    0x24
+#define GPIO_BRR     0x28
+#define GPIO_ASCR    0x2C
 
 /* 0b11111111_11111111_00000000_00000000 */
 #define RESERVED_BITS_MASK 0xFFFF0000
@@ -74,18 +73,18 @@ static void stm32f429_gpio_reset_hold(Object *obj)
 {
     STM32F429GpioState *s = STM32F429_GPIO(obj);
 
-    s->moder = s->moder_reset;
-    s->otyper = 0x00000000;
+    s->moder   = s->moder_reset;
+    s->otyper  = 0x00000000;
     s->ospeedr = s->ospeedr_reset;
-    s->pupdr = s->pupdr_reset;
-    s->idr = 0x00000000;
-    s->odr = 0x00000000;
-    s->lckr = 0x00000000;
-    s->afrl = 0x00000000;
-    s->afrh = 0x00000000;
-    s->ascr = 0x00000000;
+    s->pupdr   = s->pupdr_reset;
+    s->idr     = 0x00000000;
+    s->odr     = 0x00000000;
+    s->lckr    = 0x00000000;
+    s->afrl    = 0x00000000;
+    s->afrh    = 0x00000000;
+    s->ascr    = 0x00000000;
 
-    s->disconnected_pins = 0xFFFF;
+    s->disconnected_pins   = 0xFFFF;
     s->pins_connected_high = 0x0000;
     update_gpio_idr(s);
 }
@@ -115,12 +114,11 @@ static void stm32f429_gpio_set(void *opaque, int line, int level)
     update_gpio_idr(s);
 }
 
-
 static void update_gpio_idr(STM32F429GpioState *s)
 {
     uint32_t new_idr_mask = 0;
-    uint32_t new_idr = s->odr;
-    uint32_t old_idr = s->idr;
+    uint32_t new_idr      = s->odr;
+    uint32_t old_idr      = s->idr;
     int new_pin_state, old_pin_state;
 
     for (int i = 0; i < GPIO_NUM_PINS; i++) {
@@ -130,13 +128,13 @@ static void update_gpio_idr(STM32F429GpioState *s)
             } else if (!(s->odr & (1 << i))) {
                 /* open-drain ODR 0 */
                 new_idr_mask |= (1 << i);
-            /* open-drain ODR 1 */
+                /* open-drain ODR 1 */
             } else if (!(s->disconnected_pins & (1 << i)) &&
                        !(s->pins_connected_high & (1 << i))) {
                 /* open-drain ODR 1 with pin connected low */
                 new_idr_mask |= (1 << i);
                 new_idr &= ~(1 << i);
-            /* open-drain ODR 1 with unactive pin */
+                /* open-drain ODR 1 with unactive pin */
             } else if (is_pull_up(s, i)) {
                 new_idr_mask |= (1 << i);
             } else if (is_pull_down(s, i)) {
@@ -148,7 +146,7 @@ static void update_gpio_idr(STM32F429GpioState *s)
              * with unactive pin without pull-up or pull-down :
              * the value is floating.
              */
-        /* input or analog mode with connected pin */
+            /* input or analog mode with connected pin */
         } else if (!(s->disconnected_pins & (1 << i))) {
             if (s->pins_connected_high & (1 << i)) {
                 /* pin high */
@@ -159,7 +157,7 @@ static void update_gpio_idr(STM32F429GpioState *s)
                 new_idr_mask |= (1 << i);
                 new_idr &= ~(1 << i);
             }
-        /* input or analog mode with disconnected pin */
+            /* input or analog mode with disconnected pin */
         } else {
             if (is_pull_up(s, i)) {
                 /* pull-up */
@@ -209,8 +207,7 @@ static uint32_t get_gpio_pinmask_to_disconnect(STM32F429GpioState *s)
             if (is_push_pull(s, i) || s->pins_connected_high & (1 << i)) {
                 pins_to_disconnect |= (1 << i);
                 qemu_log_mask(LOG_GUEST_ERROR,
-                              "Line %d can't be driven externally\n",
-                              i);
+                              "Line %d can't be driven externally\n", i);
             }
         }
     }
@@ -228,8 +225,8 @@ static void disconnect_gpio_pins(STM32F429GpioState *s, uint16_t lines)
     update_gpio_idr(s);
 }
 
-static void disconnected_pins_set(Object *obj, Visitor *v,
-    const char *name, void *opaque, Error **errp)
+static void disconnected_pins_set(Object *obj, Visitor *v, const char *name,
+                                  void *opaque, Error **errp)
 {
     STM32F429GpioState *s = STM32F429_GPIO(obj);
     uint16_t value;
@@ -239,36 +236,36 @@ static void disconnected_pins_set(Object *obj, Visitor *v,
     disconnect_gpio_pins(s, value);
 }
 
-static void disconnected_pins_get(Object *obj, Visitor *v,
-    const char *name, void *opaque, Error **errp)
+static void disconnected_pins_get(Object *obj, Visitor *v, const char *name,
+                                  void *opaque, Error **errp)
 {
     visit_type_uint16(v, name, (uint16_t *)opaque, errp);
 }
 
-static void clock_freq_get(Object *obj, Visitor *v,
-    const char *name, void *opaque, Error **errp)
+static void clock_freq_get(Object *obj, Visitor *v, const char *name,
+                           void *opaque, Error **errp)
 {
-    STM32F429GpioState *s = STM32F429_GPIO(obj);
+    STM32F429GpioState *s  = STM32F429_GPIO(obj);
     uint32_t clock_freq_hz = clock_get_hz(s->clk);
     visit_type_uint32(v, name, &clock_freq_hz, errp);
 }
 
-static void stm32f429_gpio_write(void *opaque, hwaddr addr,
-                                 uint64_t val64, unsigned int size)
+static void stm32f429_gpio_write(void *opaque, hwaddr addr, uint64_t val64,
+                                 unsigned int size)
 {
     STM32F429GpioState *s = opaque;
 
     uint32_t value = val64;
     trace_stm32f429_gpio_write(s->name, addr, val64);
 
-    qemu_log("stm32f429_gpio_write GPIO%c Addr: 0x%lx w/ 0x%lx\n", *s->name, addr, val64);
+    qemu_log("stm32f429_gpio_write GPIO%c Addr: 0x%lx w/ 0x%lx\n", *s->name,
+             addr, val64);
 
     switch (addr) {
     case GPIO_MODER:
         s->moder = value;
         disconnect_gpio_pins(s, get_gpio_pinmask_to_disconnect(s));
-        qemu_log_mask(LOG_UNIMP,
-                      "%s: Analog and AF modes aren't supported\n\
+        qemu_log_mask(LOG_UNIMP, "%s: Analog and AF modes aren't supported\n\
                        Analog and AF mode behave like input mode\n",
                       __func__);
         return;
@@ -288,9 +285,7 @@ static void stm32f429_gpio_write(void *opaque, hwaddr addr,
         update_gpio_idr(s);
         return;
     case GPIO_IDR:
-        qemu_log_mask(LOG_UNIMP,
-                      "%s: GPIO->IDR is read-only\n",
-                      __func__);
+        qemu_log_mask(LOG_UNIMP, "%s: GPIO->IDR is read-only\n", __func__);
         return;
     case GPIO_ODR:
         s->odr = value & ~RESERVED_BITS_MASK;
@@ -299,7 +294,7 @@ static void stm32f429_gpio_write(void *opaque, hwaddr addr,
         return;
     case GPIO_BSRR: {
         uint32_t bits_to_reset = (value & RESERVED_BITS_MASK) >> GPIO_NUM_PINS;
-        uint32_t bits_to_set = value & ~RESERVED_BITS_MASK;
+        uint32_t bits_to_set   = value & ~RESERVED_BITS_MASK;
         /* If both BSx and BRx are set, BSx has priority.*/
         s->odr &= ~bits_to_reset;
         s->odr |= bits_to_set;
@@ -315,14 +310,12 @@ static void stm32f429_gpio_write(void *opaque, hwaddr addr,
         s->lckr = value & ~RESERVED_BITS_MASK;
         return;
     case GPIO_AFRL:
-        qemu_log_mask(LOG_UNIMP,
-                      "%s: Alternate functions aren't supported\n",
+        qemu_log_mask(LOG_UNIMP, "%s: Alternate functions aren't supported\n",
                       __func__);
         s->afrl = value;
         return;
     case GPIO_AFRH:
-        qemu_log_mask(LOG_UNIMP,
-                      "%s: Alternate functions aren't supported\n",
+        qemu_log_mask(LOG_UNIMP, "%s: Alternate functions aren't supported\n",
                       __func__);
         s->afrh = value;
         return;
@@ -333,14 +326,13 @@ static void stm32f429_gpio_write(void *opaque, hwaddr addr,
         return;
     }
     case GPIO_ASCR:
-        qemu_log_mask(LOG_UNIMP,
-                      "%s: ADC function isn't supported\n",
+        qemu_log_mask(LOG_UNIMP, "%s: ADC function isn't supported\n",
                       __func__);
         s->ascr = value & ~RESERVED_BITS_MASK;
         return;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%" HWADDR_PRIx "\n",
+                      __func__, addr);
     }
 }
 
@@ -377,26 +369,28 @@ static uint64_t stm32f429_gpio_read(void *opaque, hwaddr addr,
     case GPIO_ASCR:
         return s->ascr;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%" HWADDR_PRIx "\n",
+                      __func__, addr);
         return 0;
     }
 }
 
 static const MemoryRegionOps stm32f429_gpio_ops = {
-    .read = stm32f429_gpio_read,
-    .write = stm32f429_gpio_write,
+    .read       = stm32f429_gpio_read,
+    .write      = stm32f429_gpio_write,
     .endianness = DEVICE_NATIVE_ENDIAN,
-    .impl = {
-        .min_access_size = 4,
-        .max_access_size = 4,
-        .unaligned = false,
-    },
-    .valid = {
-        .min_access_size = 4,
-        .max_access_size = 4,
-        .unaligned = false,
-    },
+    .impl =
+        {
+            .min_access_size = 4,
+            .max_access_size = 4,
+            .unaligned       = false,
+        },
+    .valid =
+        {
+            .min_access_size = 4,
+            .max_access_size = 4,
+            .unaligned       = false,
+        },
 };
 
 static void stm32f429_gpio_init(Object *obj)
@@ -414,10 +408,10 @@ static void stm32f429_gpio_init(Object *obj)
     s->clk = qdev_init_clock_in(DEVICE(s), "clk", NULL, s, 0);
 
     object_property_add(obj, "disconnected-pins", "uint16",
-                        disconnected_pins_get, disconnected_pins_set,
-                        NULL, &s->disconnected_pins);
-    object_property_add(obj, "clock-freq-hz", "uint32",
-                        clock_freq_get, NULL, NULL, NULL);
+                        disconnected_pins_get, disconnected_pins_set, NULL,
+                        &s->disconnected_pins);
+    object_property_add(obj, "clock-freq-hz", "uint32", clock_freq_get, NULL,
+                        NULL, NULL);
 }
 
 static void stm32f429_gpio_realize(DeviceState *dev, Error **errp)
@@ -430,10 +424,10 @@ static void stm32f429_gpio_realize(DeviceState *dev, Error **errp)
 }
 
 static const VMStateDescription vmstate_stm32f429_gpio = {
-    .name = TYPE_STM32F429_GPIO,
-    .version_id = 1,
+    .name               = TYPE_STM32F429_GPIO,
+    .version_id         = 1,
     .minimum_version_id = 1,
-    .fields = (VMStateField[]){
+    .fields             = (VMStateField[]){
         VMSTATE_UINT32(moder, STM32F429GpioState),
         VMSTATE_UINT32(otyper, STM32F429GpioState),
         VMSTATE_UINT32(ospeedr, STM32F429GpioState),
@@ -446,9 +440,7 @@ static const VMStateDescription vmstate_stm32f429_gpio = {
         VMSTATE_UINT32(ascr, STM32F429GpioState),
         VMSTATE_UINT16(disconnected_pins, STM32F429GpioState),
         VMSTATE_UINT16(pins_connected_high, STM32F429GpioState),
-        VMSTATE_END_OF_LIST()
-    }
-};
+        VMSTATE_END_OF_LIST()}};
 
 static Property stm32f429_gpio_properties[] = {
     DEFINE_PROP_STRING("name", STM32F429GpioState, name),
@@ -460,22 +452,22 @@ static Property stm32f429_gpio_properties[] = {
 
 static void stm32f429_gpio_class_init(ObjectClass *klass, void *data)
 {
-    DeviceClass *dc = DEVICE_CLASS(klass);
+    DeviceClass *dc     = DEVICE_CLASS(klass);
     ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     device_class_set_props(dc, stm32f429_gpio_properties);
-    dc->vmsd = &vmstate_stm32f429_gpio;
-    dc->realize = stm32f429_gpio_realize;
+    dc->vmsd        = &vmstate_stm32f429_gpio;
+    dc->realize     = stm32f429_gpio_realize;
     rc->phases.hold = stm32f429_gpio_reset_hold;
 }
 
 static const TypeInfo stm32f429_gpio_types[] = {
     {
-        .name = TYPE_STM32F429_GPIO,
-        .parent = TYPE_SYS_BUS_DEVICE,
+        .name          = TYPE_STM32F429_GPIO,
+        .parent        = TYPE_SYS_BUS_DEVICE,
         .instance_size = sizeof(STM32F429GpioState),
         .instance_init = stm32f429_gpio_init,
-        .class_init = stm32f429_gpio_class_init,
+        .class_init    = stm32f429_gpio_class_init,
     },
 };
 

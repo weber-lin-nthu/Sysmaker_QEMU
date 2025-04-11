@@ -1,8 +1,7 @@
 /*
  * STM32F429 GPIO (General Purpose Input/Ouput)
  *
- * Copyright (c) 2024 Arnaud Minier <arnaud.minier@telecom-paris.fr>
- * Copyright (c) 2024 Inès Varhol <ines.varhol@telecom-paris.fr>
+ * Copyright (c) {YEAR} {NAME} {EMAIL}
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
@@ -25,7 +24,7 @@
 #define TYPE_STM32F429_GPIO "stm32f429-gpio"
 OBJECT_DECLARE_SIMPLE_TYPE(STM32F429GpioState, STM32F429_GPIO)
 
-#define NUM_GPIOS 11
+#define NUM_GPIOS     11
 #define GPIO_NUM_PINS 16
 
 struct STM32F429GpioState {
