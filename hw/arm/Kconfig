@@ -477,6 +477,7 @@ config STM32F429_SOC
     select OR_IRQ
     select STM32F4XX_SYSCFG
     select STM32F4XX_EXTI
+    select STM32F429_GPIO
 
 config B_L475E_IOT01A
     bool

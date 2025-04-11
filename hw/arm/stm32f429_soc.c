@@ -30,27 +30,45 @@
 #include "hw/qdev-clock.h"
 #include "hw/misc/unimp.h"
 
-#define SYSCFG_ADD                     0x40013800
-static const uint32_t usart_addr[] = { 0x40011000, 0x40004400, 0x40004800,
-                                       0x40004C00, 0x40005000, 0x40011400,
-                                       0x40007800, 0x40007C00 };
+#define SYSCFG_ADD 0x40013800
+static const uint32_t usart_addr[] = {0x40011000, 0x40004400, 0x40004800,
+                                      0x40004C00, 0x40005000, 0x40011400,
+                                      0x40007800, 0x40007C00};
 /* At the moment only Timer 2 to 5 are modelled */
-static const uint32_t timer_addr[] = { 0x40000000, 0x40000400,
-                                       0x40000800, 0x40000C00 };
-static const uint32_t adc_addr[] = { 0x40012000, 0x40012100, 0x40012200,
-                                     0x40012300, 0x40012400, 0x40012500 };
-static const uint32_t spi_addr[] =   { 0x40013000, 0x40003800, 0x40003C00,
-                                       0x40013400, 0x40015000, 0x40015400 };
-#define EXTI_ADDR                      0x40013C00
+static const uint32_t timer_addr[] = {0x40000000, 0x40000400, 0x40000800,
+                                      0x40000C00};
+static const uint32_t adc_addr[]   = {0x40012000, 0x40012100, 0x40012200,
+                                      0x40012300, 0x40012400, 0x40012500};
+static const uint32_t spi_addr[]   = {0x40013000, 0x40003800, 0x40003C00,
+                                      0x40013400, 0x40015000, 0x40015400};
+#define EXTI_ADDR 0x40013C00
 
-#define SYSCFG_IRQ               71 // ?
-static const int usart_irq[] = { 37, 38, 39, 52, 53, 71, 82, 83 };
-static const int timer_irq[] = { 28, 29, 30, 50 };
+#define SYSCFG_IRQ 71 // ?
+static const int usart_irq[] = {37, 38, 39, 52, 53, 71, 82, 83};
+static const int timer_irq[] = {28, 29, 30, 50};
 #define ADC_IRQ 18
-static const int spi_irq[] =   { 35, 36, 51, 84, 85, 86 };
-static const int exti_irq[] =  { 6, 7, 8, 9, 10, 23, 23, 23, 23, 23, 40,
-                                 40, 40, 40, 40, 40} ;
+static const int spi_irq[]  = {35, 36, 51, 84, 85, 86};
+static const int exti_irq[] = {6,  7,  8,  9,  10, 23, 23, 23,
+                               23, 23, 40, 40, 40, 40, 40, 40};
 
+static const struct {
+    uint32_t addr;
+    uint32_t moder_reset;
+    uint32_t ospeedr_reset;
+    uint32_t pupdr_reset;
+} stm32f429_gpio_cfg[NUM_GPIOS] = {
+    {0x40020000, 0xA8000000, 0x0C000000, 0x64000000},
+    {0x40020400, 0x00000280, 0x000000C0, 0x00000100},
+    {0x40020800, 0x00000000, 0x00000000, 0x00000000},
+    {0x40020C00, 0x00000000, 0x00000000, 0x00000000},
+    {0x40021000, 0x00000000, 0x00000000, 0x00000000},
+    {0x40021400, 0x00000000, 0x00000000, 0x00000000},
+    {0x40021800, 0x00000000, 0x00000000, 0x00000000},
+    {0x40021C00, 0x00000000, 0x00000000, 0x00000000},
+    {0x40022000, 0x00000000, 0x00000000, 0x00000000},
+    {0x40022400, 0x00000000, 0x00000000, 0x00000000},
+    {0x40022800, 0x00000000, 0x00000000, 0x00000000},
+};
 
 static void stm32f429_soc_initfn(Object *obj)
 {
@@ -81,13 +99,18 @@ static void stm32f429_soc_initfn(Object *obj)
 
     object_initialize_child(obj, "exti", &s->exti, TYPE_STM32F4XX_EXTI);
 
+    for (i = 0; i < NUM_GPIOS; i++) {
+        object_initialize_child(obj, "gpio[*]", &s->gpio[i],
+                                TYPE_STM32F429_GPIO);
+    }
+
     s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
     s->refclk = qdev_init_clock_in(DEVICE(s), "refclk", NULL, NULL, 0);
 }
 
 static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
 {
-    STM32F429State *s = STM32F429_SOC(dev_soc);
+    STM32F429State *s           = STM32F429_SOC(dev_soc);
     MemoryRegion *system_memory = get_system_memory();
     DeviceState *dev, *armv7m;
     SysBusDevice *busdev;
@@ -125,22 +148,19 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
         return;
     }
     memory_region_init_alias(&s->flash_alias, OBJECT(dev_soc),
-                             "STM32F429.flash.alias", &s->flash, 0,
-                             FLASH_SIZE);
+                             "STM32F429.flash.alias", &s->flash, 0, FLASH_SIZE);
 
     memory_region_add_subregion(system_memory, FLASH_BASE_ADDRESS, &s->flash);
     memory_region_add_subregion(system_memory, 0, &s->flash_alias);
 
-    memory_region_init_ram(&s->sram, NULL, "STM32F429.sram", SRAM_SIZE,
-                           &err);
+    memory_region_init_ram(&s->sram, NULL, "STM32F429.sram", SRAM_SIZE, &err);
     if (err != NULL) {
         error_propagate(errp, err);
         return;
     }
     memory_region_add_subregion(system_memory, SRAM_BASE_ADDRESS, &s->sram);
 
-    memory_region_init_ram(&s->ccm, NULL, "STM32F429.ccm", CCM_SIZE,
-                           &err);
+    memory_region_init_ram(&s->ccm, NULL, "STM32F429.ccm", CCM_SIZE, &err);
     if (err != NULL) {
         error_propagate(errp, err);
         return;
@@ -243,6 +263,29 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
         qdev_connect_gpio_out(DEVICE(&s->syscfg), i, qdev_get_gpio_in(dev, i));
     }
 
+    /* GPIO device*/
+    for (i = 0; i < NUM_GPIOS; i++) {
+        g_autofree char *name = g_strdup_printf("%c", 'A' + i);
+        dev                   = DEVICE(&(s->gpio[i]));
+        qdev_prop_set_string(dev, "name", name);
+        qdev_prop_set_uint32(dev, "mode-reset",
+                             stm32f429_gpio_cfg[i].moder_reset);
+        qdev_prop_set_uint32(dev, "ospeed-reset",
+                             stm32f429_gpio_cfg[i].ospeedr_reset);
+        qdev_prop_set_uint32(dev, "pupd-reset",
+                             stm32f429_gpio_cfg[i].pupdr_reset);
+        busdev = SYS_BUS_DEVICE(dev);
+        g_free(name);
+        name = g_strdup_printf("gpio%c-out", 'a' + i);
+        // qdev_connect_clock_in(DEVICE(&s->gpio[i]), "clk",
+        //                       qdev_get_clock_out(DEVICE(&(s->rcc)), name));
+        if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio[i]), errp)) {
+            return;
+        }
+        sysbus_mmio_map(busdev, 0, stm32f429_gpio_cfg[i].addr);
+    }
+
+    // clang-format off
     create_unimplemented_device("timer[6]",    0x40001000, 0x400);
     create_unimplemented_device("timer[7]",    0x40001400, 0x400);
     create_unimplemented_device("timer[12]",   0x40001800, 0x400);
@@ -266,17 +309,17 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_device("timer[9]",    0x40014000, 0x400);
     create_unimplemented_device("timer[10]",   0x40014400, 0x400);
     create_unimplemented_device("timer[11]",   0x40014800, 0x400);
-    create_unimplemented_device("GPIOA",       0x40020000, 0x400);
-    create_unimplemented_device("GPIOB",       0x40020400, 0x400);
-    create_unimplemented_device("GPIOC",       0x40020800, 0x400);
-    create_unimplemented_device("GPIOD",       0x40020C00, 0x400);
-    create_unimplemented_device("GPIOE",       0x40021000, 0x400);
-    create_unimplemented_device("GPIOF",       0x40021400, 0x400);
-    create_unimplemented_device("GPIOG",       0x40021800, 0x400);
-    create_unimplemented_device("GPIOH",       0x40021C00, 0x400);
-    create_unimplemented_device("GPIOI",       0x40022000, 0x400);
-    create_unimplemented_device("GPIOJ",       0x40022400, 0x400);
-    create_unimplemented_device("GPIOK",       0x40022800, 0x400);
+    // create_unimplemented_device("GPIOA",       0x40020000, 0x400);
+    // create_unimplemented_device("GPIOB",       0x40020400, 0x400);
+    // create_unimplemented_device("GPIOC",       0x40020800, 0x400);
+    // create_unimplemented_device("GPIOD",       0x40020C00, 0x400);
+    // create_unimplemented_device("GPIOE",       0x40021000, 0x400);
+    // create_unimplemented_device("GPIOF",       0x40021400, 0x400);
+    // create_unimplemented_device("GPIOG",       0x40021800, 0x400);
+    // create_unimplemented_device("GPIOH",       0x40021C00, 0x400);
+    // create_unimplemented_device("GPIOI",       0x40022000, 0x400);
+    // create_unimplemented_device("GPIOJ",       0x40022400, 0x400);
+    // create_unimplemented_device("GPIOK",       0x40022800, 0x400);
     create_unimplemented_device("CRC",         0x40023000, 0x400);
     create_unimplemented_device("RCC",         0x40023800, 0x400);
     create_unimplemented_device("Flash Int",   0x40023C00, 0x400);
@@ -288,6 +331,7 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_device("USB OTG FS",  0x50000000, 0x31000);
     create_unimplemented_device("DCMI",        0x50050000, 0x400);
     create_unimplemented_device("RNG",         0x50060800, 0x400);
+    // clang-format on
 }
 
 static void stm32f429_soc_class_init(ObjectClass *klass, void *data)
