@@ -41,14 +41,14 @@ static const uint32_t adc_addr[]   = {0x40012000, 0x40012100, 0x40012200,
                                       0x40012300, 0x40012400, 0x40012500};
 static const uint32_t spi_addr[]   = {0x40013000, 0x40003800, 0x40003C00,
                                       0x40013400, 0x40015000, 0x40015400};
-#define EXTI_ADDR  0x40013C00
+#define EXTI_ADDR 0x40013C00
 
 #define SYSCFG_IRQ 71 // ?
 static const int usart_irq[] = {37, 38, 39, 52, 53, 71, 82, 83};
 static const int timer_irq[] = {28, 29, 30, 50};
 #define ADC_IRQ 18
 static const int spi_irq[]  = {35, 36, 51, 84, 85, 86};
-static const int exti_irq[] = {6,  7,  8,  9,  10, 23, 23, 23,
+static const int exti_irq[] = {6, 7, 8, 9, 10, 23, 23, 23,
                                23, 23, 40, 40, 40, 40, 40, 40};
 
 static const struct {
@@ -100,8 +100,7 @@ static void stm32f429_soc_initfn(Object *obj)
     object_initialize_child(obj, "exti", &s->exti, TYPE_STM32F4XX_EXTI);
 
     for (i = 0; i < NUM_GPIOS; i++) {
-        object_initialize_child(obj, "gpio[*]", &s->gpio[i],
-                                TYPE_STM32F429_GPIO);
+        object_initialize_child(obj, "gpio[*]", &s->gpio[i], TYPE_STM32F429_GPIO);
     }
 
     s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
@@ -241,6 +240,9 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
     /* SPI devices */
     for (i = 0; i < STM_NUM_SPIS; i++) {
         dev = DEVICE(&(s->spi[i]));
+
+        g_autofree char *name = g_strdup_printf("%d", i + 1);
+        qdev_prop_set_string(dev, "name", name);
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->spi[i]), errp)) {
             return;
         }

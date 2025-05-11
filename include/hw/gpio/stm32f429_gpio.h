@@ -20,12 +20,14 @@
 
 #include "hw/sysbus.h"
 #include "qom/object.h"
+#include "hw/gpio/perif_pinout.h"
 
 #define TYPE_STM32F429_GPIO "stm32f429-gpio"
 OBJECT_DECLARE_SIMPLE_TYPE(STM32F429GpioState, STM32F429_GPIO)
 
 #define NUM_GPIOS     11
 #define GPIO_NUM_PINS 16
+#define NUM_AF        16
 
 struct STM32F429GpioState {
     SysBusDevice parent_obj;
@@ -65,6 +67,8 @@ struct STM32F429GpioState {
     char *name;
     Clock *clk;
     qemu_irq pin[GPIO_NUM_PINS];
+
+    PerifPinoutDevice *ppd;
 };
 
 #endif

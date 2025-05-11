@@ -42,7 +42,95 @@
 /* 0b11111111_11111111_00000000_00000000 */
 #define RESERVED_BITS_MASK 0xFFFF0000
 
+static const char *af_name_regex[NUM_AF] = {
+    ".*",                                               // SYS
+    "((?:TIM)\\d+)_([^/]+)",                            // TIM1/2
+    "((?:TIM)\\d+)_([^/]+)",                            // TIM3/4/5
+    "((?:TIM)\\d+)_([^/]+)",                            // TIM8/9/10/11
+    "((?:I2C)\\d+)_([^/]+)",                            // I2C1/2/3
+    "((?:SPI)\\d+)_([^/]+)",                            // SPI1/2/3/4/5/6
+    "((?:SPI|SAI|I2S)\\d+)(?:ext)?_([^/]+)",            // SPI2/3/SAI1
+    "((?:SPI|SAI|I2S|UART|USART)\\d+)(?:ext)?_([^/]+)", // SPI3/USART1/2/3
+    "((?:UART|USART)\\d+)_([^/]+)",                     // USART6/UART4/5/7/8
+    "((?:TIM|CAN|LCD)\\d*)_([^/]+)",                    // CAN1/2/TIM12/13/14/LCD
+    "((?:OTG_HS|OTG_FS)\\d*)_([^/]+)",                  // OTG2_HS/OTH1_FS
+    "((?:ETH))_([^/]+)",                                // ETH
+    "((?:OTG_HS|OTG_FS|FMC|SDIO)\\d*)_([^/]+)",         // FMC/SDIO/OTG2_FS
+    "((?:DCMI)\\d*)_([^/]+)",                           // DCMI
+    "((?:LCD)\\d*)_([^/]+)",                            // LCD
+    ".*",                                               // SYS
+};
+typedef const char *port_af_map_type[GPIO_NUM_PINS][NUM_AF];
+static const port_af_map_type porta_af_map = {
+    {[1] = "TIM2_CH1/TIM2_ETR", [2] = "TIM5_CH1", [3] = "TIM8_ETR", [7] = "USART2_CTS", [8] = "UART4_TX", [11] = "ETH_MII_CRS", [15] = "EVENTOUT"},
+    {[1] = "TIM2_CH2", [2] = "TIM5_CH2", [7] = "USART2_RTS", [8] = "UART4_RX", [11] = "ETH_MII_RX_CLK/ETH_RMII_REF_CLK", [15] = "EVENTOUT"},
+    {[1] = "TIM2_CH3", [2] = "TIM5_CH3", [3] = "TIM9_CH1", [7] = "USART2_TX", [11] = "ETH_MDIO", [15] = "EVENTOUT"},
+    {[1] = "TIM2_CH4", [2] = "TIM5_CH4", [3] = "TIM9_CH2", [7] = "USART2_RX", [10] = "OTG_HS_ULPI_D0", [11] = "ETH_MII_COL", [14] = "LCD_B5", [15] = "EVENTOUT"},
+    {[5] = "SPI1_NSS", [6] = "SPI3_NSS/I2S3_WS", [7] = "USART2_CK", [12] = "OTG_HS_SOF", [13] = "DCMI_HSYNC", [14] = "LCD_VSYNC", [15] = "EVENTOUT"},
+    {[1] = "TIM2_CH1/TIM2_ETR", [3] = "TIM8_CH1N", [5] = "SPI1_SCK", [10] = "OTG_HS_ULPI_CK", [15] = "EVENTOUT"},
+    {[1] = "TIM1_BKIN", [2] = "TIM3_CH1", [3] = "TIM8_BKIN", [5] = "SPI1_MISO", [9] = "TIM13_CH1", [13] = "DCMI_PIXCLK", [14] = "LCD_G2", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH1N", [2] = "TIM3_CH2", [3] = "TIM8_CH1N", [5] = "SPI1_MOSI", [9] = "TIM14_CH1", [11] = "ETH_MII_RX_DV/ETH_RMII_CRS_DV", [15] = "EVENTOUT"},
+    {[0] = "MCO1", [1] = "TIM1_CH1", [4] = "I2C3_SCL", [7] = "USART1_CK", [10] = "OTG_FS_SOF", [14] = "LCD_R6", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH2", [4] = "I2C3_SMBA", [7] = "USART1_TX", [13] = "DCMI_D0", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH3", [7] = "USART1_RX", [10] = "OTG_FS_ID", [13] = "DCMI_D1", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH4", [7] = "USART1_CTS", [9] = "CAN1_RX", [10] = "OTG_FS_DM", [14] = "LCD_R4", [15] = "EVENTOUT"},
+    {[1] = "TIM1_ETR", [7] = "USART1_RTS", [9] = "CAN1_TX", [10] = "OTG_FS_DP", [14] = "LCD_R5", [15] = "EVENTOUT"},
+    {[0] = "JTMSSWDIO", [15] = "EVENTOUT"},
+    {[0] = "JTCKSWCLK", [15] = "EVENTOUT"},
+    {[0] = "JTDI", [1] = "TIM2_CH1/TIM2_ETR", [5] = "SPI1_NSS", [6] = "SPI3_NSS/I2S3_WS", [15] = "EVENTOUT"},
+};
+static const port_af_map_type porte_af_map = {
+    {[2] = "TIM4_ETR", [8] = "UART8_Rx", [12] = "FMC_NBL0", [13] = "DCMI_D2", [15] = "EVENTOUT"},
+    {[8] = "UART8_Tx", [12] = "FMC_NBL1", [13] = "DCMI_D3", [15] = "EVENTOUT"},
+    {[0] = "TRACECLK", [5] = "SPI4_SCK", [6] = "SAI1_MCLK_A", [11] = "ETH_MII_TXD3", [12] = "FMC_A23", [15] = "EVENTOUT"},
+    {[0] = "TRACED0", [6] = "SAI1_SD_B", [12] = "FMC_A19", [15] = "EVENTOUT"},
+    {[0] = "TRACED1", [5] = "SPI4_NSS", [6] = "SAI1_FS_A", [12] = "FMC_A20", [13] = "DCMI_D4", [14] = "LCD_B0", [15] = "EVENTOUT"},
+    {[0] = "TRACED2", [3] = "TIM9_CH1", [5] = "SPI4_MISO", [6] = "SAI1_SCK_A", [12] = "FMC_A21", [13] = "DCMI_D6", [14] = "LCD_G0", [15] = "EVENTOUT"},
+    {[0] = "TRACED3", [3] = "TIM9_CH2", [5] = "SPI4_MOSI", [6] = "SAI1_SD_A", [12] = "FMC_A22", [13] = "DCMI_D7", [14] = "LCD_G1", [15] = "EVENTOUT"},
+    {[1] = "TIM1_ETR", [8] = "UART7_Rx", [12] = "FMC_D4", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH1N", [8] = "UART7_Tx", [12] = "FMC_D5", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH1", [12] = "FMC_D6", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH2N", [12] = "FMC_D7", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH2", [5] = "SPI4_NSS", [12] = "FMC_D8", [14] = "LCD_G3", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH3N", [5] = "SPI4_SCK", [12] = "FMC_D9", [14] = "LCD_B4", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH3", [5] = "SPI4_MISO", [12] = "FMC_D10", [14] = "LCD_DE", [15] = "EVENTOUT"},
+    {[1] = "TIM1_CH4", [5] = "SPI4_MOSI", [12] = "FMC_D11", [14] = "LCD_CLK", [15] = "EVENTOUT"},
+    {[1] = "TIM1_BKIN", [12] = "FMC_D12", [14] = "LCD_R7", [15] = "EVENTOUT"},
+};
+static const port_af_map_type portg_af_map = {
+    {[12] = "FMC_A10", [15] = "EVENTOUT"},
+    {[12] = "FMC_A11", [15] = "EVENTOUT"},
+    {[12] = "FMC_A12", [15] = "EVENTOUT"},
+    {[12] = "FMC_A13", [15] = "EVENTOUT"},
+    {[12] = "FMC_A14/FMC_BA0", [15] = "EVENTOUT"},
+    {[12] = "FMC_A15/FMC_BA1", [15] = "EVENTOUT"},
+    {[12] = "FMC_INT2", [13] = "DCMI_D12", [14] = "LCD_R7", [15] = "EVENTOUT"},
+    {[8] = "USART6_CK", [12] = "FMC_INT3", [13] = "DCMI_D13", [14] = "LCD_CLK", [15] = "EVENTOUT"},
+    {[5] = "SPI6_NSS", [8] = "USART6_RTS", [11] = "ETH_PPS_OUT", [12] = "FMC_SDCLK", [15] = "EVENTOUT"},
+    {[8] = "USART6_RX", [12] = "FMC_NE2/FMC_NCE3", [13] = "DCMI_VSYNC", [15] = "EVENTOUT"},
+    {[9] = "LCD_G3", [12] = "FMC_NCE4_1/FMC_NE3", [13] = "DCMI_D2", [14] = "LCD_B2", [15] = "EVENTOUT"},
+    {[11] = "ETH_MII_TX_EN/ETH_RMII_TX_EN", [12] = "FMC_NCE4_2", [13] = "DCMI_D3", [14] = "LCD_B3", [15] = "EVENTOUT"},
+    {[5] = "SPI6_MISO", [8] = "USART6_RTS", [9] = "LCD_B4", [12] = "FMC_NE4", [14] = "LCD_B1", [15] = "EVENTOUT"},
+    {[5] = "SPI6_SCK", [8] = "USART6_CTS", [11] = "ETH_MII_TXD0/ETH_RMII_TXD0", [12] = "FMC_A24", [15] = "EVENTOUT"},
+    {[5] = "SPI6_MOSI", [8] = "USART6_TX", [11] = "ETH_MII_TXD1/ETH_RMII_TXD1", [12] = "FMC_A25", [15] = "EVENTOUT"},
+    {[8] = "USART6_CTS", [12] = "FMC_SDNCAS", [13] = "DCMI_D13", [15] = "EVENTOUT"},
+};
+static const port_af_map_type *const port_af_map[NUM_GPIOS] = {
+    &porta_af_map,
+    NULL, // Unimplemented
+    NULL, // Unimplemented
+    NULL, // Unimplemented
+    &porte_af_map,
+    NULL, // Unimplemented
+    &portg_af_map,
+    NULL, // Unimplemented
+    NULL, // Unimplemented
+    NULL, // Unimplemented
+    NULL, // Unimplemented
+};
+
 static void update_gpio_idr(STM32F429GpioState *s);
+static void update_ppd_pin_val(STM32F429GpioState *s);
 
 static bool is_pull_up(STM32F429GpioState *s, unsigned pin)
 {
@@ -190,6 +278,8 @@ static void update_gpio_idr(STM32F429GpioState *s)
             }
         }
     }
+
+    update_ppd_pin_val(s);
 }
 
 /*
@@ -250,6 +340,57 @@ static void clock_freq_get(Object *obj, Visitor *v, const char *name,
     visit_type_uint32(v, name, &clock_freq_hz, errp);
 }
 
+static void update_ppd_af(STM32F429GpioState *s)
+{
+    PerifPinoutDeviceClass *k    = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
+    g_autofree gchar *perif_name = NULL;
+    g_autofree gchar *pin_name   = NULL;
+    g_autofree gchar *func_name  = NULL;
+    for (int pin_num = 0; pin_num < GPIO_NUM_PINS; ++pin_num) {
+        if (((s->moder >> (pin_num * 2)) & 0b11) != 0b10) {
+            continue;
+        }
+        int af_num = (pin_num >= 8) ? (af_num = (s->afrh >> ((pin_num - 8) * 4) & 0b1111))
+                                    : (af_num = (s->afrl >> (pin_num * 4) & 0b1111));
+
+        const port_af_map_type *cur_af_map = port_af_map[(int)(*s->name - 'A')];
+        if (!cur_af_map)
+            continue;
+        const char *func_desc = (*cur_af_map)[pin_num][af_num];
+        if (!func_desc)
+            continue;
+        g_autoptr(GRegex) regex = g_regex_new(af_name_regex[af_num], 0, 0, NULL);
+        g_autoptr(GMatchInfo) match_info;
+        g_regex_match(regex, func_desc, 0, &match_info);
+
+        pin_name = g_strdup_printf("P%c%d", *s->name, pin_num);
+        while (g_match_info_matches(match_info)) {
+            perif_name = g_match_info_fetch(match_info, 1);
+            func_name  = g_match_info_fetch(match_info, 2);
+            g_match_info_next(match_info, NULL);
+            k->register_perif_pin(k, perif_name, pin_name, func_name);
+        }
+    }
+
+    GString *setting = qobject_to_json_pretty(QOBJECT(k->peripheral_pins), true);
+    qemu_log("peripheral_pins: \n%s\n", setting->str);
+    g_string_free(setting, true);
+}
+
+static void update_ppd_pin_val(STM32F429GpioState *s)
+{
+    PerifPinoutDeviceClass *k = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
+    for (int pin_num = 0; pin_num < GPIO_NUM_PINS; ++pin_num) {
+        g_autofree char *pin_name = g_strdup_printf("P%c%d", *s->name, pin_num);
+        const char *value         = ((s->idr >> pin_num) & 0b1) ? "5V" : "0V";
+        k->set_pin_value(k, pin_name, value);
+    }
+
+    GString *setting = qobject_to_json_pretty(QOBJECT(k->pin_value), true);
+    qemu_log("pin_value: \n%s\n", setting->str);
+    g_string_free(setting, true);
+}
+
 static void stm32f429_gpio_write(void *opaque, hwaddr addr, uint64_t val64,
                                  unsigned int size)
 {
@@ -265,6 +406,7 @@ static void stm32f429_gpio_write(void *opaque, hwaddr addr, uint64_t val64,
     case GPIO_MODER:
         s->moder = value;
         disconnect_gpio_pins(s, get_gpio_pinmask_to_disconnect(s));
+        update_ppd_af(s);
         qemu_log_mask(LOG_UNIMP, "%s: Analog and AF modes aren't supported\n\
                        Analog and AF mode behave like input mode\n",
                       __func__);
@@ -313,11 +455,15 @@ static void stm32f429_gpio_write(void *opaque, hwaddr addr, uint64_t val64,
         qemu_log_mask(LOG_UNIMP, "%s: Alternate functions aren't supported\n",
                       __func__);
         s->afrl = value;
+        update_ppd_af(s);
+        qemu_log("GPIO%s sets P%s[%d~%d] alternate functions to AF[%08x]\n", s->name, s->name, 7, 0, s->afrl);
         return;
     case GPIO_AFRH:
         qemu_log_mask(LOG_UNIMP, "%s: Alternate functions aren't supported\n",
                       __func__);
         s->afrh = value;
+        update_ppd_af(s);
+        qemu_log("GPIO%s sets P%s[%d~%d] alternate functions to AF[%08x]\n", s->name, s->name, 15, 8, s->afrl);
         return;
     case GPIO_BRR: {
         uint32_t bits_to_reset = value & ~RESERVED_BITS_MASK;
@@ -412,6 +558,8 @@ static void stm32f429_gpio_init(Object *obj)
                         &s->disconnected_pins);
     object_property_add(obj, "clock-freq-hz", "uint32", clock_freq_get, NULL,
                         NULL, NULL);
+
+    s->ppd = PERIF_PINOUT_DEVICE(qdev_new(TYPE_PERIF_PINOUT_DEVICE));
 }
 
 static void stm32f429_gpio_realize(DeviceState *dev, Error **errp)

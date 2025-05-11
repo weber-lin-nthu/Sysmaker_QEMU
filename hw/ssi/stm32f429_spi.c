@@ -27,19 +27,138 @@
 #include "qemu/module.h"
 #include "hw/ssi/stm32f429_spi.h"
 #include "migration/vmstate.h"
+#include "hw/qdev-properties.h"
+
+#include "qapi/qmp/qjson.h"
+#include "qapi/qmp/qdict.h"
+#include "qapi/qmp/qlist.h"
 
 #ifndef STM_SPI_ERR_DEBUG
 #define STM_SPI_ERR_DEBUG 100
 #endif
 
-#define DB_PRINT_L(lvl, fmt, args...)                                          \
-    do {                                                                       \
-        if (STM_SPI_ERR_DEBUG >= lvl) {                                        \
-            qemu_log("%s: " fmt, __func__, ##args);                            \
-        }                                                                      \
+#define DB_PRINT_L(lvl, fmt, args...)               \
+    do {                                            \
+        if (STM_SPI_ERR_DEBUG >= lvl) {             \
+            qemu_log("%s: " fmt, __func__, ##args); \
+        }                                           \
     } while (0)
 
 #define DB_PRINT(fmt, args...) DB_PRINT_L(1, fmt, ##args)
+
+#define TYPE_SPI_INTERFACE_CONFIG "spi-interface-config"
+OBJECT_DECLARE_SIMPLE_TYPE(SPIInterfaceConfig, SPI_INTERFACE_CONFIG);
+
+#define TYPE_SPI_DATA "spi-data"
+OBJECT_DECLARE_SIMPLE_TYPE(SPIData, SPI_DATA);
+
+struct SPIInterfaceConfig {
+    SCInterfaceConfig parent;
+    QDict *(*parent_to_dict)(SCInterfaceConfig *obj);
+
+    // in Hz
+    int clock_freq;
+    // [1..0] = [CPOL, CPHA]
+    uint8_t spi_mode;
+    enum BitOrder {
+        MSB,
+        LSB
+    } bit_order;
+    int data_frame_size;
+};
+
+static QDict *spi_ic_to_dict(SCInterfaceConfig *obj)
+{
+    SPIInterfaceConfig *ic = SPI_INTERFACE_CONFIG(obj);
+    QDict *res             = ic->parent_to_dict(obj);
+    qdict_put_int(res, "Clock Frequency", ic->clock_freq);
+    qdict_put_int(res, "SPI Mode", ic->spi_mode);
+    if (ic->bit_order == MSB) {
+        qdict_put_str(res, "Bit Order", "MSB");
+    } else {
+        qdict_put_str(res, "Bit Order", "LSB");
+    }
+    qdict_put_int(res, "Data Frame Size", ic->data_frame_size);
+    return res;
+}
+
+static void spi_interface_config_init(Object *obj)
+{
+    SCInterfaceConfig *sc_ic   = SC_INTERFACE_CONFIG(obj);
+    SPIInterfaceConfig *spi_ic = SPI_INTERFACE_CONFIG(obj);
+    spi_ic->parent_to_dict     = sc_ic->to_dict;
+    sc_ic->to_dict             = spi_ic_to_dict;
+    spi_ic->clock_freq         = 0;
+    spi_ic->spi_mode           = 0;
+    spi_ic->bit_order          = 0;
+    spi_ic->data_frame_size    = 0;
+}
+static const TypeInfo spi_interface_config_info = {
+    .name          = TYPE_SPI_INTERFACE_CONFIG,
+    .parent        = TYPE_SC_INTERFACE_CONFIG,
+    .instance_size = sizeof(SPIInterfaceConfig),
+    .instance_init = spi_interface_config_init,
+};
+static void spi_interface_config_register_types(void)
+{
+    type_register_static(&spi_interface_config_info);
+}
+type_init(spi_interface_config_register_types);
+
+struct SPIData {
+    SCData parent;
+    QDict *(*parent_to_dict)(SCData *obj);
+
+    // list of bytes, represented in string (either hex or binary)
+    // e.g. ["0b10010101", "0b10000101"] or ["0x95", "0x85"]
+    QList *cs_data;
+    QList *mosi_data;
+    QList *miso_data;
+};
+
+static QDict *spi_data_to_dict(SCData *obj)
+{
+    SPIData *d = SPI_DATA(obj);
+    QDict *res = d->parent_to_dict(obj);
+    if (d->cs_data)
+        qdict_put(res, "CS", qlist_copy(d->cs_data));
+    if (d->mosi_data)
+        qdict_put(res, "MOSI", qlist_copy(d->mosi_data));
+    if (d->miso_data)
+        qdict_put(res, "MISO", qlist_copy(d->miso_data));
+    return res;
+}
+
+static void spi_data_init(Object *obj)
+{
+    SCData *scd       = SC_DATA(obj);
+    SPIData *d        = SPI_DATA(obj);
+    d->parent_to_dict = scd->to_dict;
+    scd->to_dict      = spi_data_to_dict;
+    d->cs_data        = NULL;
+    d->mosi_data      = NULL;
+    d->miso_data      = NULL;
+}
+static const TypeInfo spi_data_info = {
+    .name          = TYPE_SPI_DATA,
+    .parent        = TYPE_SC_DATA,
+    .instance_size = sizeof(SPIData),
+    .instance_init = spi_data_init,
+};
+static void spi_data_register_types(void)
+{
+    type_register_static(&spi_data_info);
+}
+type_init(spi_data_register_types);
+
+static GString *itoa2(uint8_t val)
+{
+    GString *res = g_string_new("0b");
+    for (uint8_t m = 1u << 7; m; m >>= 1) {
+        g_string_append_c(res, (val & m) ? '1' : '0');
+    }
+    return res;
+}
 
 static void stm32f429_spi_reset(DeviceState *dev)
 {
@@ -58,11 +177,36 @@ static void stm32f429_spi_reset(DeviceState *dev)
 
 static void stm32f429_spi_transfer(STM32F429SPIState *s)
 {
-    DB_PRINT("Data to send: 0x%x, ASCII: %c\n", s->spi_dr, (char)s->spi_dr);
+    DB_PRINT("SPI%s Data to send: 0x%x, ASCII: %c\n", s->name, s->spi_dr, (char)s->spi_dr);
 
-    
+    int CPOL = s->spi_cr1 & STM_SPI_CR1_CPOL;
+    int CPHA = s->spi_cr1 & STM_SPI_CR1_CPHA;
 
-    DB_PRINT("Data received: 0x%x, ASCII: %c\n", s->spi_dr, (char)s->spi_dr);
+    SCDataPack *data_pack  = sc_datapack_new("SPI", TYPE_SPI_INTERFACE_CONFIG, TYPE_SPI_DATA);
+    SPIInterfaceConfig *ic = SPI_INTERFACE_CONFIG(data_pack->interface_config);
+    SPIData *data          = SPI_DATA(data_pack->data);
+
+    ic->clock_freq      = 4000000; // dummy value
+    ic->spi_mode        = (CPOL << 1) | CPHA;
+    ic->bit_order       = (s->spi_cr1 & (1u << 7)) ? LSB : MSB;
+    ic->data_frame_size = (s->spi_cr1 & (1u << 11)) ? 16 : 8;
+
+    if (!data->mosi_data)
+        data->mosi_data = qlist_new();
+    GString *mosi_str = itoa2(s->spi_dr);
+    qlist_append_str(data->mosi_data, mosi_str->str);
+    g_string_free(mosi_str, true);
+
+    g_autofree char *perif_name = g_strdup_printf("SPI%s", s->name);
+    PerifPinoutDeviceClass *k   = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
+    SCDataPack *response        = k->transport(k, perif_name, data_pack);
+
+    sc_datapack_free(data_pack);
+    sc_datapack_free(response);
+
+    s->spi_dr = ssi_transfer(s->ssi, s->spi_dr);
+
+    DB_PRINT("SPI%s Data received: 0x%x, ASCII: %c\n", s->name, s->spi_dr, (char)s->spi_dr);
 }
 
 static uint64_t stm32f429_spi_read(void *opaque, hwaddr addr, unsigned int size)
@@ -132,6 +276,14 @@ static void stm32f429_spi_write(void *opaque, hwaddr addr, uint64_t val64,
 
     switch (addr) {
     case STM_SPI_CR1:
+        qemu_log("[SPI control register 1]:\n");
+        // qemu_log("\tBidirectional data mode enable: %s\n", (value & (1u << 15)) ? "1-line bidirectional data mode selected" : "2-line unidirectional data mode selected");
+        qemu_log("\tData frame format: %s\n", (value & (1u << 11)) ? "16-bit data frame format is selected for transmission/reception" : " 8-bit data frame format is selected for transmission/reception");
+        qemu_log("\tFrame format: %s\n", (value & (1u << 7)) ? "LSB transmitted first" : "MSB transmitted first");
+        qemu_log("\tSPI enable: %s\n", (value & (1u << 6)) ? "Peripheral enabled" : "Peripheral disabled");
+        qemu_log("\tBaud rate control: %s/%d\n", "f_PCLK", (2u << ((value >> 3) & (0b111))));
+        qemu_log("\tClock polarity: %s\n", (value & (1u << 1)) ? "CK to 1 when idle" : "CK to 0 when idle");
+        qemu_log("\tClock phase: %s\n", (value & (1u << 0)) ? "1: The second clock transition is the first data capture edge" : "0: The first clock transition is the first data capture edge");
         s->spi_cr1 = value;
         return;
     case STM_SPI_CR2:
@@ -211,17 +363,27 @@ static const VMStateDescription vmstate_stm32f429_spi = {
 static void stm32f429_spi_init(Object *obj)
 {
     STM32F429SPIState *s = STM32F429_SPI(obj);
+    DeviceState *dev     = DEVICE(obj);
 
     memory_region_init_io(&s->mmio, obj, &stm32f429_spi_ops, s,
                           TYPE_STM32F429_SPI, 0x400);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->mmio);
 
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
+
+    s->ssi = ssi_create_bus(dev, "ssi");
+    s->ppd = PERIF_PINOUT_DEVICE(qdev_new(TYPE_PERIF_PINOUT_DEVICE));
 }
 
+static Property stm32f429_spi_properties[] = {
+    DEFINE_PROP_STRING("name", STM32F429SPIState, name),
+    DEFINE_PROP_END_OF_LIST(),
+};
 static void stm32f429_spi_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+
+    device_class_set_props(dc, stm32f429_spi_properties);
 
     dc->reset = stm32f429_spi_reset;
     dc->vmsd  = &vmstate_stm32f429_spi;

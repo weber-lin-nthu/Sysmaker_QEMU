@@ -27,21 +27,34 @@
 
 #include "hw/sysbus.h"
 #include "qom/object.h"
+#include "hw/ssi/ssi.h"
+#include "hw/gpio/perif_pinout.h"
 
-#define STM_SPI_CR1        0x00
-#define STM_SPI_CR2        0x04
-#define STM_SPI_SR         0x08
-#define STM_SPI_DR         0x0C
-#define STM_SPI_CRCPR      0x10
-#define STM_SPI_RXCRCR     0x14
-#define STM_SPI_TXCRCR     0x18
-#define STM_SPI_I2SCFGR    0x1C
-#define STM_SPI_I2SPR      0x20
+#define STM_SPI_CR1     0x00
+#define STM_SPI_CR2     0x04
+#define STM_SPI_SR      0x08
+#define STM_SPI_DR      0x0C
+#define STM_SPI_CRCPR   0x10
+#define STM_SPI_RXCRCR  0x14
+#define STM_SPI_TXCRCR  0x18
+#define STM_SPI_I2SCFGR 0x1C
+#define STM_SPI_I2SPR   0x20
 
-#define STM_SPI_CR1_SPE    (1 << 6)
-#define STM_SPI_CR1_MSTR   (1 << 2)
+/*
+DFF -> Data Frame Format: 0 = 8-bit, 1 = 16-bit; Set only when SPI is disabled (SPE = 0)
+SPE -> SPI enable: 0 = Peripheral disabled, 1 = Peripheral enabled;
+                   When disabling the SPI, follow the procedure described in Section 28.3.8.
+MSTR -> Master selection: 0 = slave, 1 = master
+CPOL -> Clock polarity
+CPHA -> Clock phase
+ */
+#define STM_SPI_CR1_DFF  (1 << 11)
+#define STM_SPI_CR1_SPE  (1 << 6)
+#define STM_SPI_CR1_MSTR (1 << 2)
+#define STM_SPI_CR1_CPOL (1 << 1)
+#define STM_SPI_CR1_CPHA (1 << 0)
 
-#define STM_SPI_SR_RXNE    (1 << 0)
+#define STM_SPI_SR_RXNE (1 << 0)
 
 #define TYPE_STM32F429_SPI "stm32f429-spi"
 OBJECT_DECLARE_SIMPLE_TYPE(STM32F429SPIState, STM32F429_SPI)
@@ -63,7 +76,10 @@ struct STM32F429SPIState {
     uint32_t spi_i2scfgr;
     uint32_t spi_i2spr;
 
+    char *name;
     qemu_irq irq;
+    SSIBus *ssi;
+    PerifPinoutDevice *ppd;
 };
 
 #endif /* HW_STM32F429_SPI_H */
