@@ -18,6 +18,8 @@ OBJECT_DECLARE_SIMPLE_TYPE(SCInterfaceConfig, SC_INTERFACE_CONFIG)
 #define TYPE_SC_DATA "sc-data"
 OBJECT_DECLARE_SIMPLE_TYPE(SCData, SC_DATA)
 
+#define PERIF_PIN_DEFAULT_VAL "0V"
+
 struct SCInterfaceConfig {
     /*< private >*/
     Object parent;
@@ -38,8 +40,8 @@ struct SCData {
 
 typedef struct SCDataPack {
     QList *pins;
-    int begin_time;
-    int end_Time;
+    int64_t begin_time;
+    int64_t end_Time;
     GString *type;
     SCInterfaceConfig *interface_config;
     SCData *data;
@@ -47,6 +49,8 @@ typedef struct SCDataPack {
 
 SCDataPack *sc_datapack_new(const char *typename, const char *interface_typename, const char *data_typename);
 void sc_datapack_free(SCDataPack *obj);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(SCDataPack, sc_datapack_free);
 
 struct PerifPinoutDeviceClass {
     /*< private >*/

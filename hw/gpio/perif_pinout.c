@@ -2,6 +2,7 @@
 #include "hw/gpio/perif_pinout.h"
 #include "qapi/error.h"
 #include "qapi/qmp/qstring.h"
+#include "sysemu/cpu-timers.h"
 
 static QDict *sc_interface_config_to_dict(SCInterfaceConfig *obj)
 {
@@ -45,11 +46,17 @@ static void sc_data_init(Object *obj)
     o->to_dict   = sc_data_to_dict;
     o->pin_value = qdict_new();
 }
+static void sc_data_finalize(Object *obj)
+{
+    SCData *o = SC_DATA(obj);
+    qdict_unref(o->pin_value);
+}
 static const TypeInfo sc_data_info = {
-    .name          = TYPE_SC_DATA,
-    .parent        = TYPE_OBJECT,
-    .instance_size = sizeof(SCData),
-    .instance_init = sc_data_init,
+    .name              = TYPE_SC_DATA,
+    .parent            = TYPE_OBJECT,
+    .instance_size     = sizeof(SCData),
+    .instance_init     = sc_data_init,
+    .instance_finalize = sc_data_finalize,
 };
 static void sc_data_register_types(void)
 {
@@ -88,8 +95,8 @@ static GString *scdatapack_to_json(SCDataPack *obj, bool pretty)
     QDict *data_pack = qdict_from_jsonf_nofail(
         "{"
         "    'Pins': %p,"
-        "    'BeginTime': %d,"
-        "    'EndTime': %d,"
+        "    'BeginTime': %ld,"
+        "    'EndTime': %ld,"
         "    'Type': %s,"
         "    'Interface Configuration': %p,"
         "    'Data': %p"
@@ -105,6 +112,35 @@ static GString *scdatapack_to_json(SCDataPack *obj, bool pretty)
     return str;
 }
 
+/*
+ * Send a single packet to SystemC
+ */
+static void systemc_write(PerifPinoutDeviceClass *klass, GString *message)
+{
+    int64_t len = message->len;
+    qio_channel_write(QIO_CHANNEL(klass->systemc_addr), (char *)&len, 8, &error_fatal);
+    qio_channel_write(QIO_CHANNEL(klass->systemc_addr), message->str, len, &error_fatal);
+}
+
+/*
+ * Read a single packet from SystemC
+ * Return the resulting GString, the caller is responsible for freeing it.
+ */
+static GString *systemc_read(PerifPinoutDeviceClass *klass)
+{
+    uint64_t len = 0;
+    qio_channel_read(QIO_CHANNEL(klass->systemc_addr), (char *)&len, 8, &error_fatal);
+    GString *msg = g_string_sized_new(len);
+    for (ssize_t read = 0; read < len;) {
+        read += qio_channel_read(QIO_CHANNEL(klass->systemc_addr), &msg->str[read], len - read, &error_fatal);
+    }
+    return msg;
+}
+
+/*
+ * Send a data_pack to SystemC, and receive new data_pack from SystemC
+ * Return the resulting data_pack, the caller is responsible for freeing it.
+ */
 static SCDataPack *transport(PerifPinoutDeviceClass *klass, const char *perif_name, SCDataPack *data_pack)
 {
     const QDict *pin_to_external_hw = klass->external_hw_pins.pin_to_external_hw;
@@ -113,15 +149,23 @@ static SCDataPack *transport(PerifPinoutDeviceClass *klass, const char *perif_na
     QDict *hw_set                   = qdict_new();
     QDict *pin_value                = data_pack->data->pin_value;
 
-    int max_iter = 100;
+    data_pack->begin_time = icount_get(); // in nano second
+
+    // g_autoptr(GString) before_msg = scdatapack_to_json(data_pack, true);
+    // qemu_log("Before annotation: \n%s\n", before_msg->str);
+
+    int max_iter = 512;
     for (bool updated = true; updated && max_iter--;) {
         updated = false;
         const QDictEntry *it;
         for (it = qdict_first(pin_set); it;
              it = qdict_next(pin_set, it)) {
-            const char *pin_name = qdict_entry_key(it);
-            QList *external_hw   = qdict_get_qlist(pin_to_external_hw, pin_name);
+            const char *pin_name     = qdict_entry_key(it);
+            const QList *external_hw = qdict_get_qlist(pin_to_external_hw, pin_name);
             const QListEntry *eit;
+            if (!external_hw) {
+                continue;
+            }
             for (eit = qlist_first(external_hw); eit;
                  eit = qlist_next(eit)) {
                 const char *hw_name = qstring_get_str(qobject_to(QString, qlist_entry_obj(eit)));
@@ -132,23 +176,32 @@ static SCDataPack *transport(PerifPinoutDeviceClass *klass, const char *perif_na
         for (it = qdict_first(hw_set); it;
              it = qdict_next(hw_set, it)) {
             const char *hw_name = qdict_entry_key(it);
-            QList *pins         = qdict_get_qlist(external_hw_to_pin, hw_name);
+            const QList *pins   = qdict_get_qlist(external_hw_to_pin, hw_name);
             const QListEntry *pit;
+            if (!pins) {
+                continue;
+            }
             for (pit = qlist_first(pins); pit;
                  pit = qlist_next(pit)) {
                 const char *pin_name = qstring_get_str(qobject_to(QString, qlist_entry_obj(pit)));
-                if (!qdict_get(pin_set, pin_name)) {
+                if (!qdict_get(pin_set, pin_name)) { // new pin found!
                     qdict_put_null(pin_set, pin_name);
-                    if (qdict_get_try_str(klass->pin_value, pin_name))
-                        qdict_put_str(pin_value, pin_name, qdict_get_str(klass->pin_value, pin_name));
+                    const char *cur_pin_val = qdict_get_try_str(klass->pin_value, pin_name);
+                    if (!cur_pin_val) {
+                        cur_pin_val = PERIF_PIN_DEFAULT_VAL;
+                    }
+                    qdict_put_str(pin_value, pin_name, cur_pin_val);
                     updated = true;
                 }
             }
         }
     }
     qdict_unref(hw_set);
-    if (max_iter < 0)
-        qemu_log("In transport: pin set expansion max iteration count reached!\n");
+    if (max_iter < 0) {
+        Error *err = NULL;
+        error_setg(&err, "In SystemC transport: pin set supplementation max iteration count reached! Pin set might not be complete.\n");
+        warn_report_err(err);
+    }
 
     const QDictEntry *it;
     for (it = qdict_first(pin_set); it;
@@ -158,8 +211,9 @@ static SCDataPack *transport(PerifPinoutDeviceClass *klass, const char *perif_na
     }
     data_pack->interface_config->pin_config = qdict_clone_shallow(pin_set);
 
-    GString *msg = scdatapack_to_json(data_pack, true);
-    qio_channel_write(QIO_CHANNEL(klass->systemc_addr), msg->str, msg->len, &error_abort);
+    g_autoptr(GString) msg = scdatapack_to_json(data_pack, true);
+    systemc_write(klass, msg);
+
     return sc_datapack_new(NULL, NULL, NULL);
 }
 
@@ -183,13 +237,28 @@ static void unregister_perif_pin(PerifPinoutDeviceClass *klass, const char *peri
 
 static void set_pin_value(PerifPinoutDeviceClass *klass, const char *pin_name, const char *value)
 {
-    if (g_strcmp0(value, "0V") != 0 || qdict_get_try_str(klass->pin_value, pin_name)) {
+    if (g_strcmp0(value, PERIF_PIN_DEFAULT_VAL) != 0 || qdict_get_try_str(klass->pin_value, pin_name)) {
         qdict_put_str(klass->pin_value, pin_name, value);
     }
 }
 
-static void perif_pinout_netlist_init(PerifPinoutDeviceClass *k, QDict *netlist)
+static void perif_pinout_netlist_init(PerifPinoutDeviceClass *k)
 {
+    // recv netlist.json
+    QDict *netlist                 = NULL;
+    g_autoptr(GString) netlist_str = systemc_read(k);
+    if (netlist_str) {
+        Error *err = NULL;
+        netlist    = qobject_to(QDict, qobject_from_json(netlist_str->str, &err));
+        if (err) {
+            error_append_hint(&err, "Cannot convert netlist received from SystemC to dictionary!\n");
+            error_append_hint(&err, "Netlist size: %ld, Netlist received: \n%s\n", netlist_str->len, netlist_str->str);
+            error_propagate(&error_fatal, err);
+        }
+    } else {
+        netlist = qdict_new();
+    }
+
     QDict *pin_to_external_hw = k->external_hw_pins.pin_to_external_hw;
     QDict *external_hw_to_pin = k->external_hw_pins.external_hw_to_pin;
     const QDictEntry *it;
@@ -217,12 +286,11 @@ static void perif_pinout_netlist_init(PerifPinoutDeviceClass *k, QDict *netlist)
         }
     }
 
-    GString *setting = qobject_to_json_pretty(QOBJECT(pin_to_external_hw), true);
+    g_autoptr(GString) setting = qobject_to_json_pretty(QOBJECT(pin_to_external_hw), true);
     qemu_log("pin_to_external_hw: \n%s\n", setting->str);
     g_string_free(setting, true);
     setting = qobject_to_json_pretty(QOBJECT(external_hw_to_pin), true);
     qemu_log("external_hw_to_pin: \n%s\n", setting->str);
-    g_string_free(setting, true);
 }
 
 static void perif_pinout_device_class_init(ObjectClass *klass, void *data)
@@ -239,45 +307,22 @@ static void perif_pinout_device_class_init(ObjectClass *klass, void *data)
     k->pin_value                           = qdict_new();
 
     // Connect to SystemC
-    SocketAddress *addr = g_new0(SocketAddress, 1);
-    addr->type          = SOCKET_ADDRESS_TYPE_UNIX;
-    addr->u.q_unix.path = g_strdup("/tmp/fake_qemu.sock");
+    g_autoptr(SocketAddress) addr = g_new0(SocketAddress, 1);
+    addr->type                    = SOCKET_ADDRESS_TYPE_UNIX;
+    addr->u.q_unix.path           = g_strdup("/tmp/fake_qemu.sock");
     qio_channel_socket_listen_sync(k->iocs, addr, 1, &error_abort);
     qemu_log("Connecting to SystemC...\n");
     k->systemc_addr = qio_channel_socket_accept(k->iocs, &error_abort);
     qemu_log("Connected\n");
-    qapi_free_SocketAddress(addr);
 
-    // recv netlist.json
-    QDict *netlist       = NULL;
-    int netlist_str_size = 0;
-    qio_channel_read(QIO_CHANNEL(k->systemc_addr), (char *)&netlist_str_size, sizeof(int), &error_abort);
-    if (netlist_str_size != 0) {
-        GString *netlist_str = g_string_sized_new(netlist_str_size + 1);
-        qio_channel_read(QIO_CHANNEL(k->systemc_addr), netlist_str->str, netlist_str->allocated_len, &error_abort);
-        Error *errp = NULL;
-        netlist     = qobject_to(QDict, qobject_from_json(netlist_str->str, &errp));
-        if (errp != NULL) {
-            error_append_hint(&errp, "Cannot convert netlist received from SystemC to dictionary!\n");
-            error_append_hint(&errp, "Netlist size: %d\n", netlist_str_size);
-            error_append_hint(&errp, "Netlist received: \n%s\n", netlist_str->str);
-            error_report_err(errp);
-            exit(1);
-        }
-    } else {
-        netlist = qdict_new();
-    }
-    perif_pinout_netlist_init(k, netlist);
+    perif_pinout_netlist_init(k);
 
     // [test] send test data
-    SCDataPack *data_pack = sc_datapack_new(NULL, NULL, NULL);
-    GString *buf          = scdatapack_to_json(data_pack, true);
-    qio_channel_write(QIO_CHANNEL(k->systemc_addr), buf->str, buf->len, &error_abort);
+    g_autoptr(SCDataPack) data_pack = sc_datapack_new(NULL, NULL, NULL);
+    g_autoptr(GString) buf          = scdatapack_to_json(data_pack, true);
+    systemc_write(k, buf);
 }
-static void perif_pinout_device_init(Object *obj)
-{
-    // TODO
-}
+static void perif_pinout_device_init(Object *obj) {}
 static const TypeInfo perif_pinout_device_type_info = {
     .name          = TYPE_PERIF_PINOUT_DEVICE,
     .parent        = TYPE_DEVICE,

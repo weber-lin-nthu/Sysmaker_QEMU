@@ -340,35 +340,44 @@ static void clock_freq_get(Object *obj, Visitor *v, const char *name,
     visit_type_uint32(v, name, &clock_freq_hz, errp);
 }
 
-static void update_ppd_af(STM32F429GpioState *s)
+static void update_ppd_perif(STM32F429GpioState *s)
 {
-    PerifPinoutDeviceClass *k    = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
-    g_autofree gchar *perif_name = NULL;
-    g_autofree gchar *pin_name   = NULL;
-    g_autofree gchar *func_name  = NULL;
+    PerifPinoutDeviceClass *k = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
     for (int pin_num = 0; pin_num < GPIO_NUM_PINS; ++pin_num) {
-        if (((s->moder >> (pin_num * 2)) & 0b11) != 0b10) {
-            continue;
-        }
-        int af_num = (pin_num >= 8) ? (af_num = (s->afrh >> ((pin_num - 8) * 4) & 0b1111))
-                                    : (af_num = (s->afrl >> (pin_num * 4) & 0b1111));
+        int mode = (s->moder >> (pin_num * 2)) & 0b11;
+        if (mode == 0b00) { // 00: Input (reset state)
 
-        const port_af_map_type *cur_af_map = port_af_map[(int)(*s->name - 'A')];
-        if (!cur_af_map)
-            continue;
-        const char *func_desc = (*cur_af_map)[pin_num][af_num];
-        if (!func_desc)
-            continue;
-        g_autoptr(GRegex) regex = g_regex_new(af_name_regex[af_num], 0, 0, NULL);
-        g_autoptr(GMatchInfo) match_info;
-        g_regex_match(regex, func_desc, 0, &match_info);
+        } else if (mode == 0b01) { // 01: General purpose output mode
+            g_autofree gchar *pin_name   = g_strdup_printf("P%c%d", *s->name, pin_num);
+            g_autofree gchar *perif_name = g_strdup_printf("GPIO%c", *s->name);
+            k->register_perif_pin(k, perif_name, pin_name, "General purpose output");
+        } else if (mode == 0b10) { // 10: Alternate function mode
+            int af_num =
+                (pin_num >= 8)
+                    ? (af_num = (s->afrh >> ((pin_num - 8) * 4) & 0b1111))
+                    : (af_num = (s->afrl >> (pin_num * 4) & 0b1111));
 
-        pin_name = g_strdup_printf("P%c%d", *s->name, pin_num);
-        while (g_match_info_matches(match_info)) {
-            perif_name = g_match_info_fetch(match_info, 1);
-            func_name  = g_match_info_fetch(match_info, 2);
-            g_match_info_next(match_info, NULL);
-            k->register_perif_pin(k, perif_name, pin_name, func_name);
+            const port_af_map_type *cur_af_map = port_af_map[(int)(*s->name - 'A')];
+            if (!cur_af_map)
+                continue;
+            const char *func_desc = (*cur_af_map)[pin_num][af_num];
+            if (!func_desc)
+                continue;
+            g_autoptr(GRegex) regex = g_regex_new(af_name_regex[af_num], 0, 0, NULL);
+            g_autoptr(GMatchInfo) match_info;
+            g_regex_match(regex, func_desc, 0, &match_info);
+
+            g_autofree gchar *pin_name = g_strdup_printf("P%c%d", *s->name, pin_num);
+            while (g_match_info_matches(match_info)) {
+                g_autofree gchar *perif_name = g_match_info_fetch(match_info, 1);
+                g_autofree gchar *func_name  = g_match_info_fetch(match_info, 2);
+                g_match_info_next(match_info, NULL);
+                k->register_perif_pin(k, perif_name, pin_name, func_name);
+            }
+        } else { // 11: Analog mode
+            g_autofree gchar *pin_name   = g_strdup_printf("P%c%d", *s->name, pin_num);
+            g_autofree gchar *perif_name = g_strdup_printf("GPIO%c", *s->name);
+            k->register_perif_pin(k, perif_name, pin_name, "Analog");
         }
     }
 
@@ -406,7 +415,7 @@ static void stm32f429_gpio_write(void *opaque, hwaddr addr, uint64_t val64,
     case GPIO_MODER:
         s->moder = value;
         disconnect_gpio_pins(s, get_gpio_pinmask_to_disconnect(s));
-        update_ppd_af(s);
+        update_ppd_perif(s);
         qemu_log_mask(LOG_UNIMP, "%s: Analog and AF modes aren't supported\n\
                        Analog and AF mode behave like input mode\n",
                       __func__);
@@ -455,14 +464,14 @@ static void stm32f429_gpio_write(void *opaque, hwaddr addr, uint64_t val64,
         qemu_log_mask(LOG_UNIMP, "%s: Alternate functions aren't supported\n",
                       __func__);
         s->afrl = value;
-        update_ppd_af(s);
+        update_ppd_perif(s);
         qemu_log("GPIO%s sets P%s[%d~%d] alternate functions to AF[%08x]\n", s->name, s->name, 7, 0, s->afrl);
         return;
     case GPIO_AFRH:
         qemu_log_mask(LOG_UNIMP, "%s: Alternate functions aren't supported\n",
                       __func__);
         s->afrh = value;
-        update_ppd_af(s);
+        update_ppd_perif(s);
         qemu_log("GPIO%s sets P%s[%d~%d] alternate functions to AF[%08x]\n", s->name, s->name, 15, 8, s->afrl);
         return;
     case GPIO_BRR: {

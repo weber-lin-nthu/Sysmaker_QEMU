@@ -93,11 +93,13 @@ static void spi_interface_config_init(Object *obj)
     spi_ic->bit_order          = 0;
     spi_ic->data_frame_size    = 0;
 }
+static void spi_interface_config_finalize(Object *obj) {}
 static const TypeInfo spi_interface_config_info = {
-    .name          = TYPE_SPI_INTERFACE_CONFIG,
-    .parent        = TYPE_SC_INTERFACE_CONFIG,
-    .instance_size = sizeof(SPIInterfaceConfig),
-    .instance_init = spi_interface_config_init,
+    .name              = TYPE_SPI_INTERFACE_CONFIG,
+    .parent            = TYPE_SC_INTERFACE_CONFIG,
+    .instance_size     = sizeof(SPIInterfaceConfig),
+    .instance_init     = spi_interface_config_init,
+    .instance_finalize = spi_interface_config_finalize,
 };
 static void spi_interface_config_register_types(void)
 {
@@ -139,11 +141,19 @@ static void spi_data_init(Object *obj)
     d->mosi_data      = NULL;
     d->miso_data      = NULL;
 }
+static void spi_data_finalize(Object *obj)
+{
+    SPIData *d = SPI_DATA(obj);
+    qlist_unref(d->cs_data);
+    qlist_unref(d->mosi_data);
+    qlist_unref(d->miso_data);
+}
 static const TypeInfo spi_data_info = {
-    .name          = TYPE_SPI_DATA,
-    .parent        = TYPE_SC_DATA,
-    .instance_size = sizeof(SPIData),
-    .instance_init = spi_data_init,
+    .name              = TYPE_SPI_DATA,
+    .parent            = TYPE_SC_DATA,
+    .instance_size     = sizeof(SPIData),
+    .instance_init     = spi_data_init,
+    .instance_finalize = spi_data_finalize,
 };
 static void spi_data_register_types(void)
 {
@@ -182,9 +192,9 @@ static void stm32f429_spi_transfer(STM32F429SPIState *s)
     int CPOL = s->spi_cr1 & STM_SPI_CR1_CPOL;
     int CPHA = s->spi_cr1 & STM_SPI_CR1_CPHA;
 
-    SCDataPack *data_pack  = sc_datapack_new("SPI", TYPE_SPI_INTERFACE_CONFIG, TYPE_SPI_DATA);
-    SPIInterfaceConfig *ic = SPI_INTERFACE_CONFIG(data_pack->interface_config);
-    SPIData *data          = SPI_DATA(data_pack->data);
+    g_autoptr(SCDataPack) data_pack = sc_datapack_new("SPI", TYPE_SPI_INTERFACE_CONFIG, TYPE_SPI_DATA);
+    SPIInterfaceConfig *ic          = SPI_INTERFACE_CONFIG(data_pack->interface_config);
+    SPIData *data                   = SPI_DATA(data_pack->data);
 
     ic->clock_freq      = 4000000; // dummy value
     ic->spi_mode        = (CPOL << 1) | CPHA;
@@ -197,12 +207,9 @@ static void stm32f429_spi_transfer(STM32F429SPIState *s)
     qlist_append_str(data->mosi_data, mosi_str->str);
     g_string_free(mosi_str, true);
 
-    g_autofree char *perif_name = g_strdup_printf("SPI%s", s->name);
-    PerifPinoutDeviceClass *k   = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
-    SCDataPack *response        = k->transport(k, perif_name, data_pack);
-
-    sc_datapack_free(data_pack);
-    sc_datapack_free(response);
+    g_autofree char *perif_name    = g_strdup_printf("SPI%s", s->name);
+    PerifPinoutDeviceClass *k      = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
+    g_autoptr(SCDataPack) response = k->transport(k, perif_name, data_pack);
 
     s->spi_dr = ssi_transfer(s->ssi, s->spi_dr);
 
