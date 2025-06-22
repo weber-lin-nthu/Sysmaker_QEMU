@@ -52,6 +52,8 @@ void sc_datapack_free(SCDataPack *obj);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(SCDataPack, sc_datapack_free);
 
+extern const char *systemc_path;
+
 struct PerifPinoutDeviceClass {
     /*< private >*/
     DeviceClass parent_class;

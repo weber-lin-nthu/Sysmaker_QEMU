@@ -27,6 +27,7 @@
 #include "qemu/datadir.h"
 #include "qemu/units.h"
 #include "exec/cpu-common.h"
+#include "hw/gpio/perif_pinout.h"
 #include "exec/page-vary.h"
 #include "hw/qdev-properties.h"
 #include "qapi/compat-policy.h"
@@ -2828,6 +2829,9 @@ void qemu_init(int argc, char **argv)
             case QEMU_OPTION_cpu:
                 /* hw initialization will check this */
                 cpu_option = optarg;
+                break;
+            case QEMU_OPTION_systemc:
+                systemc_path = optarg;
                 break;
             case QEMU_OPTION_hda:
             case QEMU_OPTION_hdb:

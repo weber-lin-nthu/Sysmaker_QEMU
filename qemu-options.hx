@@ -178,6 +178,14 @@ SRST
     selection)
 ERST
 
+DEF("systemc", HAS_ARG, QEMU_OPTION_systemc,
+    "-systemc unix_socket_path\n"
+    "                unix socket path for connecting to SystemC\n", QEMU_ARCH_ALL)
+SRST
+``-systemc unix_socket_path``
+    unix socket path for connecting to SystemC
+ERST
+
 DEF("accel", HAS_ARG, QEMU_OPTION_accel,
     "-accel [accel=]accelerator[,prop[=value][,...]]\n"
     "                select accelerator (kvm, xen, hvf, nvmm, whpx or tcg; use 'help' for a list)\n"

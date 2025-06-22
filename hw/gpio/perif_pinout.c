@@ -117,6 +117,9 @@ static GString *scdatapack_to_json(SCDataPack *obj, bool pretty)
  */
 static void systemc_write(PerifPinoutDeviceClass *klass, GString *message)
 {
+    if (!klass->systemc_addr) {
+        return;
+    }
     int64_t len = message->len;
     qio_channel_write(QIO_CHANNEL(klass->systemc_addr), (char *)&len, 8, &error_fatal);
     qio_channel_write(QIO_CHANNEL(klass->systemc_addr), message->str, len, &error_fatal);
@@ -128,6 +131,9 @@ static void systemc_write(PerifPinoutDeviceClass *klass, GString *message)
  */
 static GString *systemc_read(PerifPinoutDeviceClass *klass)
 {
+    if (!klass->systemc_addr) {
+        return NULL;
+    }
     uint64_t len = 0;
     qio_channel_read(QIO_CHANNEL(klass->systemc_addr), (char *)&len, 8, &error_fatal);
     GString *msg = g_string_sized_new(len);
@@ -143,6 +149,9 @@ static GString *systemc_read(PerifPinoutDeviceClass *klass)
  */
 static SCDataPack *transport(PerifPinoutDeviceClass *klass, const char *perif_name, SCDataPack *data_pack)
 {
+    if (!klass->systemc_addr) {
+        return NULL;
+    }
     const QDict *pin_to_external_hw = klass->external_hw_pins.pin_to_external_hw;
     const QDict *external_hw_to_pin = klass->external_hw_pins.external_hw_to_pin;
     QDict *pin_set                  = qdict_clone_shallow(qdict_get_qdict(klass->peripheral_pins, perif_name));
@@ -293,6 +302,8 @@ static void perif_pinout_netlist_init(PerifPinoutDeviceClass *k)
     qemu_log("external_hw_to_pin: \n%s\n", setting->str);
 }
 
+const char *systemc_path;
+
 static void perif_pinout_device_class_init(ObjectClass *klass, void *data)
 {
     PerifPinoutDeviceClass *k              = PERIF_PINOUT_DEVICE_CLASS(klass);
@@ -305,24 +316,29 @@ static void perif_pinout_device_class_init(ObjectClass *klass, void *data)
     k->external_hw_pins.external_hw_to_pin = qdict_new();
     k->peripheral_pins                     = qdict_new();
     k->pin_value                           = qdict_new();
-
-    // Connect to SystemC
-    g_autoptr(SocketAddress) addr = g_new0(SocketAddress, 1);
-    addr->type                    = SOCKET_ADDRESS_TYPE_UNIX;
-    addr->u.q_unix.path           = g_strdup("/tmp/fake_qemu.sock");
-    qio_channel_socket_listen_sync(k->iocs, addr, 1, &error_abort);
-    qemu_log("Connecting to SystemC...\n");
-    k->systemc_addr = qio_channel_socket_accept(k->iocs, &error_abort);
-    qemu_log("Connected\n");
-
-    perif_pinout_netlist_init(k);
-
-    // [test] send test data
-    g_autoptr(SCDataPack) data_pack = sc_datapack_new(NULL, NULL, NULL);
-    g_autoptr(GString) buf          = scdatapack_to_json(data_pack, true);
-    systemc_write(k, buf);
+    k->systemc_addr                        = NULL;
 }
-static void perif_pinout_device_init(Object *obj) {}
+static void perif_pinout_device_init(Object *obj)
+{
+    PerifPinoutDeviceClass *k = PERIF_PINOUT_DEVICE_CLASS(obj->class);
+    if (!k->systemc_addr && systemc_path) {
+        // Connect to SystemC
+        g_autoptr(SocketAddress) addr = g_new0(SocketAddress, 1);
+        addr->type                    = SOCKET_ADDRESS_TYPE_UNIX;
+        addr->u.q_unix.path           = g_strdup(systemc_path);
+        qio_channel_socket_listen_sync(k->iocs, addr, 1, &error_abort);
+        qemu_log("Connecting to SystemC...\n");
+        k->systemc_addr = qio_channel_socket_accept(k->iocs, &error_abort);
+        qemu_log("Connected\n");
+
+        perif_pinout_netlist_init(k);
+
+        // [test] send test data
+        g_autoptr(SCDataPack) data_pack = sc_datapack_new(NULL, NULL, NULL);
+        g_autoptr(GString) buf          = scdatapack_to_json(data_pack, true);
+        systemc_write(k, buf);
+    }
+}
 static const TypeInfo perif_pinout_device_type_info = {
     .name          = TYPE_PERIF_PINOUT_DEVICE,
     .parent        = TYPE_DEVICE,
