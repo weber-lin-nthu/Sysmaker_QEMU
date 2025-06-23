@@ -28,10 +28,13 @@
 #include "hw/ssi/stm32f429_spi.h"
 #include "migration/vmstate.h"
 #include "hw/qdev-properties.h"
+#include "sysemu/cpu-timers.h"
 
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qlist.h"
+#include "qapi/qmp/qstring.h"
+#include "qapi/qmp/qnum.h"
 
 #ifndef STM_SPI_ERR_DEBUG
 #define STM_SPI_ERR_DEBUG 100
@@ -52,9 +55,12 @@ OBJECT_DECLARE_SIMPLE_TYPE(SPIInterfaceConfig, SPI_INTERFACE_CONFIG);
 #define TYPE_SPI_DATA "spi-data"
 OBJECT_DECLARE_SIMPLE_TYPE(SPIData, SPI_DATA);
 
+#define QDICT_TRY_GET(dict, key, obj_type) (QOBJECT(qobject_to(obj_type, qdict_get(dict, key))))
+
 struct SPIInterfaceConfig {
     SCInterfaceConfig parent;
     QDict *(*parent_to_dict)(SCInterfaceConfig *obj);
+    void (*parent_from_dict)(SCInterfaceConfig *obj, QDict *d);
 
     // in Hz
     int clock_freq;
@@ -81,13 +87,42 @@ static QDict *spi_ic_to_dict(SCInterfaceConfig *obj)
     qdict_put_int(res, "Data Frame Size", ic->data_frame_size);
     return res;
 }
+static void spi_ic_from_dict(SCInterfaceConfig *obj, QDict *d)
+{
+    SPIInterfaceConfig *ic = SPI_INTERFACE_CONFIG(obj);
+    ic->parent_from_dict(obj, d);
+    QObject *tmp;
+    if (!(tmp = QDICT_TRY_GET(d, "Clock Frequency", QNum))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "Clock Frequency");
+    } else {
+        ic->clock_freq = qnum_get_int(qobject_to(QNum, tmp));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "SPI Mode", QNum))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "SPI Mode");
+    } else {
+        ic->spi_mode = qnum_get_int(qobject_to(QNum, tmp));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "Bit Order", QString))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "Bit Order");
+    } else {
+        const char *bit_order = qstring_get_str(qobject_to(QString, tmp));
+        ic->bit_order         = strncmp(bit_order, "MSB", 3) == 0 ? MSB : LSB;
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "Data Frame Size", QNum))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "Data Frame Size");
+    } else {
+        ic->data_frame_size = qnum_get_int(qobject_to(QNum, tmp));
+    }
+}
 
 static void spi_interface_config_init(Object *obj)
 {
     SCInterfaceConfig *sc_ic   = SC_INTERFACE_CONFIG(obj);
     SPIInterfaceConfig *spi_ic = SPI_INTERFACE_CONFIG(obj);
     spi_ic->parent_to_dict     = sc_ic->to_dict;
+    spi_ic->parent_from_dict   = sc_ic->from_dict;
     sc_ic->to_dict             = spi_ic_to_dict;
+    sc_ic->from_dict           = spi_ic_from_dict;
     spi_ic->clock_freq         = 0;
     spi_ic->spi_mode           = 0;
     spi_ic->bit_order          = 0;
@@ -110,9 +145,9 @@ type_init(spi_interface_config_register_types);
 struct SPIData {
     SCData parent;
     QDict *(*parent_to_dict)(SCData *obj);
+    void (*parent_from_dict)(SCData *obj, QDict *d);
 
-    // list of bytes, represented in string (either hex or binary)
-    // e.g. ["0b10010101", "0b10000101"] or ["0x95", "0x85"]
+    // list of bytes, represented in 16-bit integer
     QList *cs_data;
     QList *mosi_data;
     QList *miso_data;
@@ -120,26 +155,49 @@ struct SPIData {
 
 static QDict *spi_data_to_dict(SCData *obj)
 {
-    SPIData *d = SPI_DATA(obj);
-    QDict *res = d->parent_to_dict(obj);
-    if (d->cs_data)
-        qdict_put(res, "CS", qlist_copy(d->cs_data));
-    if (d->mosi_data)
-        qdict_put(res, "MOSI", qlist_copy(d->mosi_data));
-    if (d->miso_data)
-        qdict_put(res, "MISO", qlist_copy(d->miso_data));
+    SPIData *data = SPI_DATA(obj);
+    QDict *res    = data->parent_to_dict(obj);
+    if (data->cs_data)
+        qdict_put(res, "CS", qlist_copy(data->cs_data));
+    if (data->mosi_data)
+        qdict_put(res, "MOSI", qlist_copy(data->mosi_data));
+    if (data->miso_data)
+        qdict_put(res, "MISO", qlist_copy(data->miso_data));
     return res;
+}
+static void spi_data_from_dict(SCData *obj, QDict *d)
+{
+    SPIData *data = SPI_DATA(obj);
+    data->parent_from_dict(obj, d);
+    QObject *tmp;
+    if (!(tmp = QDICT_TRY_GET(d, "CS", QList))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "CS");
+    } else {
+        data->cs_data = qlist_copy(qobject_to(QList, tmp));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "MOSI", QList))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "MOSI");
+    } else {
+        data->mosi_data = qlist_copy(qobject_to(QList, tmp));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "MISO", QList))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "MISO");
+    } else {
+        data->miso_data = qlist_copy(qobject_to(QList, tmp));
+    }
 }
 
 static void spi_data_init(Object *obj)
 {
-    SCData *scd       = SC_DATA(obj);
-    SPIData *d        = SPI_DATA(obj);
-    d->parent_to_dict = scd->to_dict;
-    scd->to_dict      = spi_data_to_dict;
-    d->cs_data        = NULL;
-    d->mosi_data      = NULL;
-    d->miso_data      = NULL;
+    SCData *scd         = SC_DATA(obj);
+    SPIData *d          = SPI_DATA(obj);
+    d->parent_to_dict   = scd->to_dict;
+    d->parent_from_dict = scd->from_dict;
+    scd->to_dict        = spi_data_to_dict;
+    scd->from_dict      = spi_data_from_dict;
+    d->cs_data          = NULL;
+    d->mosi_data        = NULL;
+    d->miso_data        = NULL;
 }
 static void spi_data_finalize(Object *obj)
 {
@@ -160,15 +218,6 @@ static void spi_data_register_types(void)
     type_register_static(&spi_data_info);
 }
 type_init(spi_data_register_types);
-
-static GString *itoa2(uint8_t val)
-{
-    GString *res = g_string_new("0b");
-    for (uint8_t m = 1u << 7; m; m >>= 1) {
-        g_string_append_c(res, (val & m) ? '1' : '0');
-    }
-    return res;
-}
 
 static void stm32f429_spi_reset(DeviceState *dev)
 {
@@ -203,24 +252,48 @@ static void stm32f429_spi_transfer(STM32F429SPIState *s)
 
     if (!data->mosi_data)
         data->mosi_data = qlist_new();
-    GString *mosi_str = itoa2(s->spi_dr);
-    qlist_append_str(data->mosi_data, mosi_str->str);
-    g_string_free(mosi_str, true);
+    qlist_append_int(data->mosi_data, (uint16_t)s->spi_dr);
 
-    g_autofree char *perif_name    = g_strdup_printf("SPI%s", s->name);
-    PerifPinoutDeviceClass *k      = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
-    g_autoptr(SCDataPack) response = k->transport(k, perif_name, data_pack);
+    g_autofree char *perif_name = g_strdup_printf("SPI%s", s->name);
+    PerifPinoutDeviceClass *k   = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
+    k->transport(k, perif_name, data_pack, data_pack);
+
+    // Deal with responding data pack
+
+    DB_PRINT("end time: %s\n", data_pack->end_time->str);
+    STM32F429SPIFifoEntry *e = g_new(STM32F429SPIFifoEntry, 1);
+    e->timeout               = atoll(data_pack->end_time->str);
+    if (data->miso_data && !qlist_empty(data->miso_data)) {
+        e->value = qnum_get_int(qobject_to(QNum, qlist_entry_obj(qlist_first(data->miso_data))));
+    }
+    timer_mod_anticipate_ns(s->timer, e->timeout);
+    DB_PRINT("curr time: %ld ns, new timeout at: %ld ns, with data %d\n", icount_get(), e->timeout, e->value);
+    QTAILQ_INSERT_TAIL(&s->ppd_fifo_head, e, entries);
 
     s->spi_dr = ssi_transfer(s->ssi, s->spi_dr);
 
-    DB_PRINT("SPI%s Data received: 0x%x, ASCII: %c\n", s->name, s->spi_dr, (char)s->spi_dr);
+    // DB_PRINT("SPI%s Data received: 0x%x, ASCII: %c\n", s->name, s->spi_dr, (char)s->spi_dr);
+}
+
+static void transfer_callback(void *opaque)
+{
+    STM32F429SPIState *s = opaque;
+
+    STM32F429SPIFifoEntry *e = QTAILQ_FIRST(&s->ppd_fifo_head);
+    QTAILQ_REMOVE(&s->ppd_fifo_head, e, entries);
+    DB_PRINT("callback called at: %ld ns, processing fifo data %d, ASCII: %c\n", icount_get(), e->value, (char)e->value);
+    s->spi_dr = e->value;
+    s->spi_sr |= STM_SPI_SR_RXNE;
+    DB_PRINT("SPI_DR and SPI_SR_RXNE updated\n");
+    g_free(e);
+    /* TODO: fetch next event in queue*/
 }
 
 static uint64_t stm32f429_spi_read(void *opaque, hwaddr addr, unsigned int size)
 {
     STM32F429SPIState *s = opaque;
 
-    DB_PRINT("Address: 0x%" HWADDR_PRIx "\n", addr);
+    DB_PRINT("[%ld ns]: Address: 0x%" HWADDR_PRIx "\n", icount_get(), addr);
 
     switch (addr) {
     case STM_SPI_CR1:
@@ -232,7 +305,7 @@ static uint64_t stm32f429_spi_read(void *opaque, hwaddr addr, unsigned int size)
     case STM_SPI_SR:
         return s->spi_sr;
     case STM_SPI_DR:
-        stm32f429_spi_transfer(s);
+        // stm32f429_spi_transfer(s);
         s->spi_sr &= ~STM_SPI_SR_RXNE;
         return s->spi_dr;
     case STM_SPI_CRCPR:
@@ -279,7 +352,7 @@ static void stm32f429_spi_write(void *opaque, hwaddr addr, uint64_t val64,
     STM32F429SPIState *s = opaque;
     uint32_t value       = val64;
 
-    DB_PRINT("Address: 0x%" HWADDR_PRIx ", Value: 0x%x\n", addr, value);
+    DB_PRINT("[%ld ns]: Address: 0x%" HWADDR_PRIx ", Value: 0x%x\n", icount_get(), addr, value);
 
     switch (addr) {
     case STM_SPI_CR1:
@@ -378,8 +451,10 @@ static void stm32f429_spi_init(Object *obj)
 
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
 
-    s->ssi = ssi_create_bus(dev, "ssi");
-    s->ppd = PERIF_PINOUT_DEVICE(qdev_new(TYPE_PERIF_PINOUT_DEVICE));
+    s->ssi   = ssi_create_bus(dev, "ssi");
+    s->ppd   = PERIF_PINOUT_DEVICE(qdev_new(TYPE_PERIF_PINOUT_DEVICE));
+    s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, transfer_callback, s);
+    QTAILQ_INIT(&s->ppd_fifo_head);
 }
 
 static Property stm32f429_spi_properties[] = {
@@ -410,3 +485,5 @@ static void stm32f429_spi_register_types(void)
 }
 
 type_init(stm32f429_spi_register_types)
+
+#undef QDICT_TRY_GET

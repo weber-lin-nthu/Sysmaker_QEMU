@@ -10,11 +10,21 @@ static QDict *sc_interface_config_to_dict(SCInterfaceConfig *obj)
     qdict_put(res, "Pin Configuration", qdict_clone_shallow(obj->pin_config));
     return res;
 }
+static void sc_interface_config_from_dict(SCInterfaceConfig *obj, QDict *d)
+{
+    QDict *tmp = qdict_get_qdict(d, "Pin Configuration");
+    if (tmp == NULL) {
+        qemu_log("QDict missing key: Pin Configuration");
+    } else {
+        obj->pin_config = qdict_clone_shallow(tmp);
+    }
+}
 
 static void sc_interface_config_init(Object *obj)
 {
     SCInterfaceConfig *o = SC_INTERFACE_CONFIG(obj);
     o->to_dict           = sc_interface_config_to_dict;
+    o->from_dict         = sc_interface_config_from_dict;
     o->pin_config        = qdict_new();
 }
 static void sc_interface_config_finalize(Object *obj)
@@ -39,11 +49,18 @@ static QDict *sc_data_to_dict(SCData *obj)
 {
     return qdict_clone_shallow(obj->pin_value);
 }
+static void sc_data_from_dict(SCData *obj, QDict *d)
+{
+    if (d) {
+        obj->pin_value = qdict_clone_shallow(d);
+    }
+}
 
 static void sc_data_init(Object *obj)
 {
     SCData *o    = SC_DATA(obj);
     o->to_dict   = sc_data_to_dict;
+    o->from_dict = sc_data_from_dict;
     o->pin_value = qdict_new();
 }
 static void sc_data_finalize(Object *obj)
@@ -73,6 +90,8 @@ SCDataPack *sc_datapack_new(const char *typename, const char *interface_typename
     }
     SCDataPack *obj       = (SCDataPack *)g_malloc0(sizeof(SCDataPack));
     obj->pins             = qlist_new();
+    obj->begin_time       = g_string_new(NULL);
+    obj->end_time         = g_string_new(NULL);
     obj->type             = g_string_new(typename);
     obj->interface_config = SC_INTERFACE_CONFIG(object_new(interface_typename));
     obj->data             = SC_DATA(object_new(data_typename));
@@ -95,15 +114,15 @@ static GString *scdatapack_to_json(SCDataPack *obj, bool pretty)
     QDict *data_pack = qdict_from_jsonf_nofail(
         "{"
         "    'Pins': %p,"
-        "    'BeginTime': %ld,"
-        "    'EndTime': %ld,"
+        "    'BeginTime': %s,"
+        "    'EndTime': %s,"
         "    'Type': %s,"
         "    'Interface Configuration': %p,"
         "    'Data': %p"
         "}",
         qlist_copy(obj->pins),
-        obj->begin_time,
-        obj->end_Time,
+        obj->begin_time->str,
+        obj->end_time->str,
         obj->type->str,
         ic,
         data);
@@ -111,6 +130,58 @@ static GString *scdatapack_to_json(SCDataPack *obj, bool pretty)
     qobject_unref(data_pack);
     return str;
 }
+#define QDICT_TRY_GET(dict, key, obj_type) (QOBJECT(qobject_to(obj_type, qdict_get(dict, key))))
+static void scdatapack_update_from_dict(SCDataPack *obj, QDict *d)
+{
+    QObject *tmp;
+    if (!(tmp = QDICT_TRY_GET(d, "Pins", QList))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "Pins");
+    } else {
+        if (obj->pins) {
+            qlist_unref(obj->pins);
+        }
+        obj->pins = qlist_copy(qobject_to(QList, tmp));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "BeginTime", QString))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "BeginTime");
+    } else {
+        if (obj->begin_time) {
+            g_string_free(obj->begin_time, true);
+        }
+        obj->begin_time = g_string_new(qstring_get_str(qobject_to(QString, tmp)));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "EndTime", QString))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "EndTime");
+    } else {
+        if (obj->end_time) {
+            g_string_free(obj->end_time, true);
+        }
+        obj->end_time = g_string_new(qstring_get_str(qobject_to(QString, tmp)));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "Type", QString))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "Type");
+    } else {
+        if (obj->type) {
+            g_string_free(obj->type, true);
+        }
+        obj->type = g_string_new(qstring_get_str(qobject_to(QString, tmp)));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "Interface Configuration", QDict))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "Interface Configuration");
+    } else if (!obj->interface_config) {
+        qemu_log("SCDataPack missing Interface Configuration obj");
+    } else {
+        obj->interface_config->from_dict(obj->interface_config, qobject_to(QDict, tmp));
+    }
+    if (!(tmp = QDICT_TRY_GET(d, "Data", QDict))) {
+        qemu_log("QDict missing key or wrong type: %s\n", "Data");
+    } else if (!obj->data) {
+        qemu_log("SCDataPack missing Data obj");
+    } else {
+        obj->data->from_dict(obj->data, qobject_to(QDict, tmp));
+    }
+}
+#undef QDICT_TRY_GET
 
 /*
  * Send a single packet to SystemC
@@ -136,10 +207,12 @@ static GString *systemc_read(PerifPinoutDeviceClass *klass)
     }
     uint64_t len = 0;
     qio_channel_read(QIO_CHANNEL(klass->systemc_addr), (char *)&len, 8, &error_fatal);
-    GString *msg = g_string_sized_new(len);
+    GString *msg = g_string_sized_new(len + 1);
     for (ssize_t read = 0; read < len;) {
         read += qio_channel_read(QIO_CHANNEL(klass->systemc_addr), &msg->str[read], len - read, &error_fatal);
     }
+    msg->str[len] = '\0';
+    msg->len      = len;
     return msg;
 }
 
@@ -147,10 +220,10 @@ static GString *systemc_read(PerifPinoutDeviceClass *klass)
  * Send a data_pack to SystemC, and receive new data_pack from SystemC
  * Return the resulting data_pack, the caller is responsible for freeing it.
  */
-static SCDataPack *transport(PerifPinoutDeviceClass *klass, const char *perif_name, SCDataPack *data_pack)
+static void transport(PerifPinoutDeviceClass *klass, const char *perif_name, SCDataPack *data_pack, SCDataPack *resp_data_pack)
 {
     if (!klass->systemc_addr) {
-        return NULL;
+        return;
     }
     const QDict *pin_to_external_hw = klass->external_hw_pins.pin_to_external_hw;
     const QDict *external_hw_to_pin = klass->external_hw_pins.external_hw_to_pin;
@@ -158,7 +231,7 @@ static SCDataPack *transport(PerifPinoutDeviceClass *klass, const char *perif_na
     QDict *hw_set                   = qdict_new();
     QDict *pin_value                = data_pack->data->pin_value;
 
-    data_pack->begin_time = icount_get(); // in nano second
+    g_string_printf(data_pack->begin_time, "%ld ns", icount_get()); // in nano second
 
     // g_autoptr(GString) before_msg = scdatapack_to_json(data_pack, true);
     // qemu_log("Before annotation: \n%s\n", before_msg->str);
@@ -223,7 +296,22 @@ static SCDataPack *transport(PerifPinoutDeviceClass *klass, const char *perif_na
     g_autoptr(GString) msg = scdatapack_to_json(data_pack, true);
     systemc_write(klass, msg);
 
-    return sc_datapack_new(NULL, NULL, NULL);
+    // reading response
+    if (resp_data_pack != NULL) {
+        g_autoptr(GString) resp_msg = systemc_read(klass);
+        if (resp_msg->len) {
+            g_autoptr(QDict) dpobj = NULL;
+            Error *err             = NULL;
+            dpobj                  = qobject_to(QDict, qobject_from_json(resp_msg->str, &err));
+            if (err) {
+                error_append_hint(&err, "Cannot convert data pack received from SystemC to dictionary!\n");
+                error_append_hint(&err, "data pack size: %ld, data pack received: \n%s\n", resp_msg->len, resp_msg->str);
+                error_propagate(&error_fatal, err);
+            } else {
+                scdatapack_update_from_dict(resp_data_pack, dpobj);
+            }
+        }
+    }
 }
 
 static void register_perif_pin(PerifPinoutDeviceClass *klass, const char *perif_name, const char *pin_name, const char *func_name)
@@ -254,7 +342,7 @@ static void set_pin_value(PerifPinoutDeviceClass *klass, const char *pin_name, c
 static void perif_pinout_netlist_init(PerifPinoutDeviceClass *k)
 {
     // recv netlist.json
-    QDict *netlist                 = NULL;
+    g_autoptr(QDict) netlist       = NULL;
     g_autoptr(GString) netlist_str = systemc_read(k);
     if (netlist_str) {
         Error *err = NULL;
@@ -334,9 +422,9 @@ static void perif_pinout_device_init(Object *obj)
         perif_pinout_netlist_init(k);
 
         // [test] send test data
-        g_autoptr(SCDataPack) data_pack = sc_datapack_new(NULL, NULL, NULL);
-        g_autoptr(GString) buf          = scdatapack_to_json(data_pack, true);
-        systemc_write(k, buf);
+        // g_autoptr(SCDataPack) data_pack = sc_datapack_new(NULL, NULL, NULL);
+        // g_autoptr(GString) buf          = scdatapack_to_json(data_pack, true);
+        // systemc_write(k, buf);
     }
 }
 static const TypeInfo perif_pinout_device_type_info = {

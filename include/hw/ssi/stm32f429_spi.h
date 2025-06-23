@@ -59,6 +59,15 @@ CPHA -> Clock phase
 #define TYPE_STM32F429_SPI "stm32f429-spi"
 OBJECT_DECLARE_SIMPLE_TYPE(STM32F429SPIState, STM32F429_SPI)
 
+typedef struct STM32F429SPIFifoEntry {
+    uint64_t timeout;
+    uint32_t value;
+    /* TODO: config the following in .clang-format*/
+    // clang-format off
+    QTAILQ_ENTRY(STM32F429SPIFifoEntry) entries;
+    // clang-format on
+} STM32F429SPIFifoEntry;
+
 struct STM32F429SPIState {
     /* <private> */
     SysBusDevice parent_obj;
@@ -80,6 +89,12 @@ struct STM32F429SPIState {
     qemu_irq irq;
     SSIBus *ssi;
     PerifPinoutDevice *ppd;
+    // list<pair<uint64_t, uint32_t>>: list of timeout val to data val
+    /* TODO: config the following in .clang-format*/
+    // clang-format off
+    QTAILQ_HEAD(, STM32F429SPIFifoEntry) ppd_fifo_head;
+    // clang-format on
+    QEMUTimer *timer;
 };
 
 #endif /* HW_STM32F429_SPI_H */

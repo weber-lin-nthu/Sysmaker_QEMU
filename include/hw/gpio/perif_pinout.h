@@ -27,6 +27,7 @@ struct SCInterfaceConfig {
     QDict *pin_config;
 
     QDict *(*to_dict)(SCInterfaceConfig *obj);
+    void (*from_dict)(SCInterfaceConfig *obj, QDict *d);
 };
 
 struct SCData {
@@ -36,12 +37,13 @@ struct SCData {
     QDict *pin_value;
 
     QDict *(*to_dict)(SCData *obj);
+    void (*from_dict)(SCData *obj, QDict *d);
 };
 
 typedef struct SCDataPack {
     QList *pins;
-    int64_t begin_time;
-    int64_t end_Time;
+    GString *begin_time;
+    GString *end_time;
     GString *type;
     SCInterfaceConfig *interface_config;
     SCData *data;
@@ -77,7 +79,7 @@ struct PerifPinoutDeviceClass {
     QDict *pin_value;
 
     /*< public >*/
-    SCDataPack *(*transport)(PerifPinoutDeviceClass *klass, const char *perif_name, SCDataPack *data_pack);
+    void (*transport)(PerifPinoutDeviceClass *klass, const char *perif_name, SCDataPack *data_pack, SCDataPack *resp_data_pack);
     void (*register_perif_pin)(PerifPinoutDeviceClass *klass, const char *perif_name, const char *pin_name, const char *func_name);
     void (*unregister_perif_pin)(PerifPinoutDeviceClass *klass, const char *perif_name, const char *pin_name);
     void (*set_pin_value)(PerifPinoutDeviceClass *klass, const char *pin_name, const char *value);

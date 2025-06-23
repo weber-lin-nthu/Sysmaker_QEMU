@@ -42,8 +42,9 @@
 /* 0b11111111_11111111_00000000_00000000 */
 #define RESERVED_BITS_MASK 0xFFFF0000
 
+// regex should have `perif_name` in 1st capture group, `func_name` in 2nd capture group
 static const char *af_name_regex[NUM_AF] = {
-    ".*",                                               // SYS
+    "((.*))",                                           // SYS
     "((?:TIM)\\d+)_([^/]+)",                            // TIM1/2
     "((?:TIM)\\d+)_([^/]+)",                            // TIM3/4/5
     "((?:TIM)\\d+)_([^/]+)",                            // TIM8/9/10/11
@@ -58,7 +59,7 @@ static const char *af_name_regex[NUM_AF] = {
     "((?:OTG_HS|OTG_FS|FMC|SDIO)\\d*)_([^/]+)",         // FMC/SDIO/OTG2_FS
     "((?:DCMI)\\d*)_([^/]+)",                           // DCMI
     "((?:LCD)\\d*)_([^/]+)",                            // LCD
-    ".*",                                               // SYS
+    "((.*))",                                           // SYS
 };
 typedef const char *port_af_map_type[GPIO_NUM_PINS][NUM_AF];
 static const port_af_map_type porta_af_map = {
