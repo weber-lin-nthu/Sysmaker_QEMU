@@ -31,6 +31,9 @@ config SIFIVE_PWM
 config STM32F2XX_TIMER
     bool
 
+config STM32F429_TIMER
+    bool
+
 config CMSDK_APB_TIMER
     bool
     select PTIMER

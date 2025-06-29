@@ -475,9 +475,11 @@ config STM32F429_SOC
     depends on TCG && ARM
     select ARM_V7M
     select OR_IRQ
+    select STM32F429_TIMER
     select STM32F4XX_SYSCFG
     select STM32F4XX_EXTI
     select STM32F429_GPIO
+    select STM32F429_RCC
     select STM32F429_SPI
 
 config B_L475E_IOT01A

@@ -574,11 +574,11 @@ static void stm32f429_gpio_init(Object *obj)
 
 static void stm32f429_gpio_realize(DeviceState *dev, Error **errp)
 {
-    // STM32F429GpioState *s = STM32F429_GPIO(dev);
-    // if (!clock_has_source(s->clk)) {
-    //     error_setg(errp, "GPIO: clk input must be connected");
-    //     return;
-    // }
+    STM32F429GpioState *s = STM32F429_GPIO(dev);
+    if (!clock_has_source(s->clk)) {
+        error_setg(errp, "GPIO: clk input must be connected");
+        return;
+    }
 }
 
 static const VMStateDescription vmstate_stm32f429_gpio = {

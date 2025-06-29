@@ -50,6 +50,8 @@ static const int timer_irq[] = {28, 29, 30, 50};
 static const int spi_irq[]  = {35, 36, 51, 84, 85, 86};
 static const int exti_irq[] = {6, 7, 8, 9, 10, 23, 23, 23,
                                23, 23, 40, 40, 40, 40, 40, 40};
+#define RCC_BASE_ADDRESS 0x40023800
+#define RCC_IRQ 5
 
 static const struct {
     uint32_t addr;
@@ -86,7 +88,7 @@ static void stm32f429_soc_initfn(Object *obj)
 
     for (i = 0; i < STM_NUM_TIMERS; i++) {
         object_initialize_child(obj, "timer[*]", &s->timer[i],
-                                TYPE_STM32F2XX_TIMER);
+                                TYPE_STM32F429_TIMER);
     }
 
     for (i = 0; i < STM_NUM_ADCS; i++) {
@@ -98,6 +100,7 @@ static void stm32f429_soc_initfn(Object *obj)
     }
 
     object_initialize_child(obj, "exti", &s->exti, TYPE_STM32F4XX_EXTI);
+    object_initialize_child(obj, "rcc", &s->rcc, TYPE_STM32F429_RCC);
 
     for (i = 0; i < NUM_GPIOS; i++) {
         object_initialize_child(obj, "gpio[*]", &s->gpio[i], TYPE_STM32F429_GPIO);
@@ -171,8 +174,10 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
     qdev_prop_set_uint8(armv7m, "num-prio-bits", 4);
     qdev_prop_set_string(armv7m, "cpu-type", ARM_CPU_TYPE_NAME("cortex-m4"));
     qdev_prop_set_bit(armv7m, "enable-bitband", true);
-    qdev_connect_clock_in(armv7m, "cpuclk", s->sysclk);
-    qdev_connect_clock_in(armv7m, "refclk", s->refclk);
+    qdev_connect_clock_in(armv7m, "cpuclk",
+                          qdev_get_clock_out(DEVICE(&(s->rcc)), "cortex-fclk-out"));
+    qdev_connect_clock_in(armv7m, "refclk",
+                          qdev_get_clock_out(DEVICE(&(s->rcc)), "cortex-refclk-out"));
     object_property_set_link(OBJECT(&s->armv7m), "memory",
                              OBJECT(system_memory), &error_abort);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), errp)) {
@@ -279,13 +284,21 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
         busdev = SYS_BUS_DEVICE(dev);
         g_free(name);
         name = g_strdup_printf("gpio%c-out", 'a' + i);
-        // qdev_connect_clock_in(DEVICE(&s->gpio[i]), "clk",
-        //                       qdev_get_clock_out(DEVICE(&(s->rcc)), name));
+        qdev_connect_clock_in(DEVICE(&s->gpio[i]), "clk",
+                              qdev_get_clock_out(DEVICE(&(s->rcc)), name));
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio[i]), errp)) {
             return;
         }
         sysbus_mmio_map(busdev, 0, stm32f429_gpio_cfg[i].addr);
     }
+
+    /* RCC device */
+    busdev = SYS_BUS_DEVICE(&s->rcc);
+    if (!sysbus_realize(busdev, errp)) {
+        return;
+    }
+    sysbus_mmio_map(busdev, 0, RCC_BASE_ADDRESS);
+    sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, RCC_IRQ));
 
     // clang-format off
     create_unimplemented_device("timer[6]",    0x40001000, 0x400);
@@ -334,6 +347,10 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_device("DCMI",        0x50050000, 0x400);
     create_unimplemented_device("RNG",         0x50060800, 0x400);
     // clang-format on
+
+    
+    qemu_log("cortex-refclk-out: %ld ns\n", qdev_get_clock_out(DEVICE(&(s->rcc)), "cortex-refclk-out")->period);
+    qemu_log("cortex-fclk-out: %ld ns\n", qdev_get_clock_out(DEVICE(&(s->rcc)), "cortex-fclk-out")->period);
 }
 
 static void stm32f429_soc_class_init(ObjectClass *klass, void *data)

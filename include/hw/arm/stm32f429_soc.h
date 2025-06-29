@@ -26,11 +26,12 @@
 #define HW_ARM_STM32F429_SOC_H
 
 #include "hw/misc/stm32f4xx_syscfg.h"
-#include "hw/timer/stm32f2xx_timer.h"
+#include "hw/timer/stm32f429_timer.h"
 #include "hw/char/stm32f2xx_usart.h"
 #include "hw/adc/stm32f2xx_adc.h"
 #include "hw/misc/stm32f4xx_exti.h"
 #include "hw/gpio/stm32f429_gpio.h"
+#include "hw/misc/stm32f429_rcc.h"
 #include "hw/or-irq.h"
 #include "hw/ssi/stm32f429_spi.h"
 #include "hw/arm/armv7m.h"
@@ -39,10 +40,10 @@
 #define TYPE_STM32F429_SOC "stm32f429-soc"
 OBJECT_DECLARE_SIMPLE_TYPE(STM32F429State, STM32F429_SOC)
 
-#define STM_NUM_USARTS     7
-#define STM_NUM_TIMERS     4
-#define STM_NUM_ADCS       6
-#define STM_NUM_SPIS       6
+#define STM_NUM_USARTS 7
+#define STM_NUM_TIMERS 4
+#define STM_NUM_ADCS   6
+#define STM_NUM_SPIS   6
 
 #define FLASH_BASE_ADDRESS 0x08000000
 #define FLASH_SIZE         (2048 * 1024)
@@ -59,11 +60,12 @@ struct STM32F429State {
     STM32F4xxSyscfgState syscfg;
     STM32F4xxExtiState exti;
     STM32F2XXUsartState usart[STM_NUM_USARTS];
-    STM32F2XXTimerState timer[STM_NUM_TIMERS];
+    STM32F429TimerState timer[STM_NUM_TIMERS];
     OrIRQState adc_irqs;
     STM32F2XXADCState adc[STM_NUM_ADCS];
     STM32F429SPIState spi[STM_NUM_SPIS];
     STM32F429GpioState gpio[NUM_GPIOS];
+    Stm32f429RccState rcc;
 
     MemoryRegion ccm;
     MemoryRegion sram;
