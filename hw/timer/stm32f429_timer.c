@@ -29,18 +29,23 @@
 #include "migration/vmstate.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
+#include "sysemu/cpu-timers.h"
+#include "hw/qdev-clock.h"
+#include "qapi/visitor.h"
+#include "qapi/error.h"
 
 #ifndef STM_TIMER_ERR_DEBUG
-#define STM_TIMER_ERR_DEBUG 0
+#define STM_TIMER_ERR_DEBUG 100
 #endif
 
-#define DB_PRINT_L(lvl, fmt, args...) do { \
-    if (STM_TIMER_ERR_DEBUG >= lvl) { \
-        qemu_log("%s: " fmt, __func__, ## args); \
-    } \
-} while (0)
+#define DB_PRINT_L(lvl, fmt, args...)               \
+    do {                                            \
+        if (STM_TIMER_ERR_DEBUG >= lvl) {           \
+            qemu_log("%s: " fmt, __func__, ##args); \
+        }                                           \
+    } while (0)
 
-#define DB_PRINT(fmt, args...) DB_PRINT_L(1, fmt, ## args)
+#define DB_PRINT(fmt, args...) DB_PRINT_L(1, fmt, ##args)
 
 static void stm32f429_timer_set_alarm(STM32F429TimerState *s, int64_t now);
 
@@ -48,7 +53,7 @@ static void stm32f429_timer_interrupt(void *opaque)
 {
     STM32F429TimerState *s = opaque;
 
-    DB_PRINT("Interrupt\n");
+    DB_PRINT("[%ld ns]: Interrupt\n", icount_get());
 
     if (s->tim_dier & TIM_DIER_UIE && s->tim_cr1 & TIM_CR1_CEN) {
         s->tim_sr |= 1;
@@ -62,13 +67,21 @@ static void stm32f429_timer_interrupt(void *opaque)
         s->tim_ccer & TIM_CCER_CC2E) {
         /* PWM 2 - Mode 1 */
         DB_PRINT("PWM2 Duty Cycle: %d%%\n",
-                s->tim_ccr2 / (100 * (s->tim_psc + 1)));
+                 s->tim_ccr2 / (100 * (s->tim_psc + 1)));
     }
+}
+
+static void clock_freq_get(Object *obj, Visitor *v, const char *name,
+                           void *opaque, Error **errp)
+{
+    STM32F429TimerState *s = STM32F429TIMER(obj);
+    uint32_t clock_freq_hz = clock_get_hz(s->clk);
+    visit_type_uint32(v, name, &clock_freq_hz, errp);
 }
 
 static inline int64_t stm32f429_ns_to_ticks(STM32F429TimerState *s, int64_t t)
 {
-    return muldiv64(t, s->freq_hz, 1000000000ULL) / (s->tim_psc + 1);
+    return muldiv64(t, clock_get_hz(s->clk), 1000000000ULL) / (s->tim_psc + 1);
 }
 
 static void stm32f429_timer_set_alarm(STM32F429TimerState *s, int64_t now)
@@ -83,12 +96,12 @@ static void stm32f429_timer_set_alarm(STM32F429TimerState *s, int64_t now)
     DB_PRINT("Alarm set at: 0x%x\n", s->tim_cr1);
 
     now_ticks = stm32f429_ns_to_ticks(s, now);
-    ticks = s->tim_arr - (now_ticks - s->tick_offset);
+    ticks     = (s->tim_arr + 1) - (now_ticks - s->tick_offset);
 
-    DB_PRINT("Alarm set in %d ticks\n", (int) ticks);
+    DB_PRINT("Alarm set in %d ticks\n", (int)ticks);
 
-    s->hit_time = muldiv64((ticks + (uint64_t) now_ticks) * (s->tim_psc + 1),
-                               1000000000ULL, s->freq_hz);
+    s->hit_time = muldiv64((ticks + (uint64_t)now_ticks) * (s->tim_psc + 1),
+                           1000000000ULL, clock_get_hz(s->clk));
 
     timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + s->hit_time);
     DB_PRINT("Wait Time: %" PRId64 " ticks\n", s->hit_time);
@@ -97,36 +110,36 @@ static void stm32f429_timer_set_alarm(STM32F429TimerState *s, int64_t now)
 static void stm32f429_timer_reset(DeviceState *dev)
 {
     STM32F429TimerState *s = STM32F429TIMER(dev);
-    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    int64_t now            = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
 
-    s->tim_cr1 = 0;
-    s->tim_cr2 = 0;
-    s->tim_smcr = 0;
-    s->tim_dier = 0;
-    s->tim_sr = 0;
-    s->tim_egr = 0;
+    s->tim_cr1   = 0;
+    s->tim_cr2   = 0;
+    s->tim_smcr  = 0;
+    s->tim_dier  = 0;
+    s->tim_sr    = 0;
+    s->tim_egr   = 0;
     s->tim_ccmr1 = 0;
     s->tim_ccmr2 = 0;
-    s->tim_ccer = 0;
-    s->tim_psc = 0;
-    s->tim_arr = 0;
-    s->tim_ccr1 = 0;
-    s->tim_ccr2 = 0;
-    s->tim_ccr3 = 0;
-    s->tim_ccr4 = 0;
-    s->tim_dcr = 0;
-    s->tim_dmar = 0;
-    s->tim_or = 0;
+    s->tim_ccer  = 0;
+    s->tim_psc   = 0;
+    s->tim_arr   = 0;
+    s->tim_ccr1  = 0;
+    s->tim_ccr2  = 0;
+    s->tim_ccr3  = 0;
+    s->tim_ccr4  = 0;
+    s->tim_dcr   = 0;
+    s->tim_dmar  = 0;
+    s->tim_or    = 0;
 
     s->tick_offset = stm32f429_ns_to_ticks(s, now);
 }
 
 static uint64_t stm32f429_timer_read(void *opaque, hwaddr offset,
-                           unsigned size)
+                                     unsigned size)
 {
     STM32F429TimerState *s = opaque;
 
-    DB_PRINT("Read 0x%"HWADDR_PRIx"\n", offset);
+    DB_PRINT("Read 0x%" HWADDR_PRIx "\n", offset);
 
     switch (offset) {
     case TIM_CR1:
@@ -170,21 +183,21 @@ static uint64_t stm32f429_timer_read(void *opaque, hwaddr offset,
         return s->tim_or;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "%s: Bad offset 0x%"HWADDR_PRIx"\n", __func__, offset);
+                      "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, offset);
     }
 
     return 0;
 }
 
 static void stm32f429_timer_write(void *opaque, hwaddr offset,
-                        uint64_t val64, unsigned size)
+                                  uint64_t val64, unsigned size)
 {
     STM32F429TimerState *s = opaque;
-    uint32_t value = val64;
-    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-    uint32_t timer_val = 0;
+    uint32_t value         = val64;
+    int64_t now            = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    uint32_t timer_val     = 0;
 
-    DB_PRINT("Write 0x%x, 0x%"HWADDR_PRIx"\n", value, offset);
+    DB_PRINT("Write 0x%x, 0x%" HWADDR_PRIx "\n", value, offset);
 
     switch (offset) {
     case TIM_CR1:
@@ -220,7 +233,7 @@ static void stm32f429_timer_write(void *opaque, hwaddr offset,
         s->tim_ccer = value;
         return;
     case TIM_PSC:
-        timer_val = stm32f429_ns_to_ticks(s, now) - s->tick_offset;
+        timer_val  = stm32f429_ns_to_ticks(s, now) - s->tick_offset;
         s->tim_psc = value & 0xFFFF;
         break;
     case TIM_CNT:
@@ -253,7 +266,7 @@ static void stm32f429_timer_write(void *opaque, hwaddr offset,
         return;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "%s: Bad offset 0x%"HWADDR_PRIx"\n", __func__, offset);
+                      "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, offset);
         return;
     }
 
@@ -265,16 +278,16 @@ static void stm32f429_timer_write(void *opaque, hwaddr offset,
 }
 
 static const MemoryRegionOps stm32f429_timer_ops = {
-    .read = stm32f429_timer_read,
-    .write = stm32f429_timer_write,
+    .read       = stm32f429_timer_read,
+    .write      = stm32f429_timer_write,
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
 
 static const VMStateDescription vmstate_stm32f429_timer = {
-    .name = TYPE_STM32F429_TIMER,
-    .version_id = 1,
+    .name               = TYPE_STM32F429_TIMER,
+    .version_id         = 1,
     .minimum_version_id = 1,
-    .fields = (const VMStateField[]) {
+    .fields             = (const VMStateField[]){
         VMSTATE_INT64(tick_offset, STM32F429TimerState),
         VMSTATE_UINT32(tim_cr1, STM32F429TimerState),
         VMSTATE_UINT32(tim_cr2, STM32F429TimerState),
@@ -294,13 +307,10 @@ static const VMStateDescription vmstate_stm32f429_timer = {
         VMSTATE_UINT32(tim_dcr, STM32F429TimerState),
         VMSTATE_UINT32(tim_dmar, STM32F429TimerState),
         VMSTATE_UINT32(tim_or, STM32F429TimerState),
-        VMSTATE_END_OF_LIST()
-    }
-};
+        VMSTATE_END_OF_LIST()}};
 
 static Property stm32f429_timer_properties[] = {
-    DEFINE_PROP_UINT64("clock-frequency", struct STM32F429TimerState,
-                       freq_hz, 1000000000),
+    DEFINE_PROP_STRING("name", STM32F429TimerState, name),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -313,12 +323,21 @@ static void stm32f429_timer_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &stm32f429_timer_ops, s,
                           "stm32f429_timer", 0x400);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
+
+    s->clk = qdev_init_clock_in(DEVICE(s), "clk", NULL, s, 0);
+
+    object_property_add(obj, "clock-freq-hz", "uint32", clock_freq_get, NULL,
+                        NULL, NULL);
 }
 
 static void stm32f429_timer_realize(DeviceState *dev, Error **errp)
 {
     STM32F429TimerState *s = STM32F429TIMER(dev);
-    s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, stm32f429_timer_interrupt, s);
+    s->timer               = timer_new_ns(QEMU_CLOCK_VIRTUAL, stm32f429_timer_interrupt, s);
+    if (!clock_has_source(s->clk)) {
+        error_setg(errp, "TIM: clk input must be connected");
+        return;
+    }
 }
 
 static void stm32f429_timer_class_init(ObjectClass *klass, void *data)
@@ -327,7 +346,7 @@ static void stm32f429_timer_class_init(ObjectClass *klass, void *data)
 
     dc->reset = stm32f429_timer_reset;
     device_class_set_props(dc, stm32f429_timer_properties);
-    dc->vmsd = &vmstate_stm32f429_timer;
+    dc->vmsd    = &vmstate_stm32f429_timer;
     dc->realize = stm32f429_timer_realize;
 }
 

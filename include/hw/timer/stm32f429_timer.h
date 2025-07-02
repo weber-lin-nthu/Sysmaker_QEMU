@@ -77,7 +77,6 @@ struct STM32F429TimerState {
 
     int64_t tick_offset;
     uint64_t hit_time;
-    uint64_t freq_hz;
 
     uint32_t tim_cr1;
     uint32_t tim_cr2;
@@ -97,6 +96,9 @@ struct STM32F429TimerState {
     uint32_t tim_dcr;
     uint32_t tim_dmar;
     uint32_t tim_or;
+
+    char *name;
+    Clock *clk;
 };
 
 #endif /* HW_STM32F429_TIMER_H */

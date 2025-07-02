@@ -160,32 +160,34 @@ FIELD(PLLSAICFGR, PLLSAIN, 6, 9)
 // REG32(AHB3ENR, 0x50)
 // FIELD(AHB3ENR, QSPIEN, 8, 1)
 // FIELD(AHB3ENR, FMCEN, 0, 1)
-// REG32(APB1ENR1, 0x58)
-// FIELD(APB1ENR1, LPTIM1EN, 31, 1)
-// FIELD(APB1ENR1, OPAMPEN, 30, 1)
-// FIELD(APB1ENR1, DAC1EN, 29, 1)
-// FIELD(APB1ENR1, PWREN, 28, 1)
-// FIELD(APB1ENR1, CAN2EN, 26, 1)
-// FIELD(APB1ENR1, CAN1EN, 25, 1)
-// /* CRSEN: reserved for STM32L475xx */
-// FIELD(APB1ENR1, I2C3EN, 23, 1)
-// FIELD(APB1ENR1, I2C2EN, 22, 1)
-// FIELD(APB1ENR1, I2C1EN, 21, 1)
-// FIELD(APB1ENR1, UART5EN, 20, 1)
-// FIELD(APB1ENR1, UART4EN, 19, 1)
-// FIELD(APB1ENR1, USART3EN, 18, 1)
-// FIELD(APB1ENR1, USART2EN, 17, 1)
-// FIELD(APB1ENR1, SPI3EN, 15, 1)
-// FIELD(APB1ENR1, SPI2EN, 14, 1)
-// FIELD(APB1ENR1, WWDGEN, 11, 1)
-// /* RTCAPBEN: reserved for STM32L475xx */
-// FIELD(APB1ENR1, LCDEN, 9, 1)
-// FIELD(APB1ENR1, TIM7EN, 5, 1)
-// FIELD(APB1ENR1, TIM6EN, 4, 1)
-// FIELD(APB1ENR1, TIM5EN, 3, 1)
-// FIELD(APB1ENR1, TIM4EN, 2, 1)
-// FIELD(APB1ENR1, TIM3EN, 1, 1)
-// FIELD(APB1ENR1, TIM2EN, 0, 1)
+REG32(APB1ENR1, 0x40)
+FIELD(APB1ENR1, UART8EN, 31, 1)
+FIELD(APB1ENR1, UART7EN, 30, 1)
+FIELD(APB1ENR1, DACEN, 29, 1)
+FIELD(APB1ENR1, PWREN, 28, 1)
+FIELD(APB1ENR1, CAN2EN, 26, 1)
+FIELD(APB1ENR1, CAN1EN, 25, 1)
+/* CRSEN: reserved for STM32L475xx */
+FIELD(APB1ENR1, I2C3EN, 23, 1)
+FIELD(APB1ENR1, I2C2EN, 22, 1)
+FIELD(APB1ENR1, I2C1EN, 21, 1)
+FIELD(APB1ENR1, UART5EN, 20, 1)
+FIELD(APB1ENR1, UART4EN, 19, 1)
+FIELD(APB1ENR1, USART3EN, 18, 1)
+FIELD(APB1ENR1, USART2EN, 17, 1)
+FIELD(APB1ENR1, SPI3EN, 15, 1)
+FIELD(APB1ENR1, SPI2EN, 14, 1)
+FIELD(APB1ENR1, WWDGEN, 11, 1)
+/* RTCAPBEN: reserved for STM32L475xx */
+FIELD(APB1ENR1, TIM14EN, 8, 1)
+FIELD(APB1ENR1, TIM13EN, 7, 1)
+FIELD(APB1ENR1, TIM12EN, 6, 1)
+FIELD(APB1ENR1, TIM7EN, 5, 1)
+FIELD(APB1ENR1, TIM6EN, 4, 1)
+FIELD(APB1ENR1, TIM5EN, 3, 1)
+FIELD(APB1ENR1, TIM4EN, 2, 1)
+FIELD(APB1ENR1, TIM3EN, 1, 1)
+FIELD(APB1ENR1, TIM2EN, 0, 1)
 // REG32(APB1ENR2, 0x5C)
 // FIELD(APB1ENR2, LPTIM2EN, 5, 1)
 // FIELD(APB1ENR2, SWPMI1EN, 2, 1)
@@ -253,6 +255,13 @@ FIELD(PLLSAICFGR, PLLSAIN, 6, 9)
 // FIELD(CSR, LSIRDY, 1, 1)
 // FIELD(CSR, LSION, 0, 1)
 /* CRRCR and CCIPR2 registers are present on L496/L4A6 devices only. */
+REG32(DCKCFGR, 0X8C)
+FIELD(DCKCFGR, TIMPRE, 24, 1)
+FIELD(DCKCFGR, SAI1BSRC, 22, 2)
+FIELD(DCKCFGR, SAI1ASRC, 20, 2)
+FIELD(DCKCFGR, PLLSAIDIVR, 16, 2)
+FIELD(DCKCFGR, PLLSAIDIVQ, 8, 5)
+FIELD(DCKCFGR, PLLS2DIVQ, 0, 5)
 
 /* Read Only masks to prevent writes in unauthorized bits */
 #define CR_READ_ONLY_MASK (R_CR_PLLSAIRDY_MASK | \
@@ -912,34 +921,34 @@ static const ClockMuxInitInfo CLOCK_MUX_INIT_INFO[] = {
     //     },
     //     FILL_DEFAULT_INIT_DISABLED,
     // },
-    // [RCC_CLOCK_MUX_TIM5] = {
-    //     .name        = "tim5",
-    //     .src_mapping = {
-    //         RCC_CLOCK_MUX_SRC_PCLK1,
-    //     },
-    //     FILL_DEFAULT_INIT_DISABLED,
-    // },
-    // [RCC_CLOCK_MUX_TIM4] = {
-    //     .name        = "tim4",
-    //     .src_mapping = {
-    //         RCC_CLOCK_MUX_SRC_PCLK1,
-    //     },
-    //     FILL_DEFAULT_INIT_DISABLED,
-    // },
-    // [RCC_CLOCK_MUX_TIM3] = {
-    //     .name        = "tim3",
-    //     .src_mapping = {
-    //         RCC_CLOCK_MUX_SRC_PCLK1,
-    //     },
-    //     FILL_DEFAULT_INIT_DISABLED,
-    // },
-    // [RCC_CLOCK_MUX_TIM2] = {
-    //     .name        = "tim2",
-    //     .src_mapping = {
-    //         RCC_CLOCK_MUX_SRC_PCLK1,
-    //     },
-    //     FILL_DEFAULT_INIT_DISABLED,
-    // },
+    [RCC_CLOCK_MUX_TIM5] = {
+        .name        = "tim5",
+        .src_mapping = {
+            RCC_CLOCK_MUX_SRC_PCLK1,
+        },
+        FILL_DEFAULT_INIT_DISABLED,
+    },
+    [RCC_CLOCK_MUX_TIM4] = {
+        .name        = "tim4",
+        .src_mapping = {
+            RCC_CLOCK_MUX_SRC_PCLK1,
+        },
+        FILL_DEFAULT_INIT_DISABLED,
+    },
+    [RCC_CLOCK_MUX_TIM3] = {
+        .name        = "tim3",
+        .src_mapping = {
+            RCC_CLOCK_MUX_SRC_PCLK1,
+        },
+        FILL_DEFAULT_INIT_DISABLED,
+    },
+    [RCC_CLOCK_MUX_TIM2] = {
+        .name        = "tim2",
+        .src_mapping = {
+            RCC_CLOCK_MUX_SRC_PCLK1,
+        },
+        FILL_DEFAULT_INIT_DISABLED,
+    },
     // [RCC_CLOCK_MUX_TIM17] = {
     //     .name        = "tim17",
     //     .src_mapping = {

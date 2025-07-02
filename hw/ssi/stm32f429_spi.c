@@ -226,7 +226,8 @@ static void stm32f429_spi_reset(DeviceState *dev)
     s->spi_cr1     = 0x00000000;
     s->spi_cr2     = 0x00000000;
     s->spi_sr      = 0x00000002;
-    s->spi_dr      = 0x00000000;
+    s->spi_dr_tx   = 0x00000000;
+    s->spi_dr_rx   = 0x00000000;
     s->spi_crcpr   = 0x00000007;
     s->spi_rxcrcr  = 0x00000000;
     s->spi_txcrcr  = 0x00000000;
@@ -236,7 +237,7 @@ static void stm32f429_spi_reset(DeviceState *dev)
 
 static void stm32f429_spi_transfer(STM32F429SPIState *s)
 {
-    DB_PRINT("SPI%s Data to send: 0x%x, ASCII: %c\n", s->name, s->spi_dr, (char)s->spi_dr);
+    DB_PRINT("SPI%s Data to send: 0x%x, ASCII: %c\n", s->name, s->spi_dr_tx, (char)s->spi_dr_tx);
 
     int CPOL = s->spi_cr1 & STM_SPI_CR1_CPOL;
     int CPHA = s->spi_cr1 & STM_SPI_CR1_CPHA;
@@ -252,7 +253,7 @@ static void stm32f429_spi_transfer(STM32F429SPIState *s)
 
     if (!data->mosi_data)
         data->mosi_data = qlist_new();
-    qlist_append_int(data->mosi_data, (uint16_t)s->spi_dr);
+    qlist_append_int(data->mosi_data, (uint16_t)s->spi_dr_tx);
 
     g_autofree char *perif_name = g_strdup_printf("SPI%s", s->name);
     PerifPinoutDeviceClass *k   = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
@@ -260,7 +261,7 @@ static void stm32f429_spi_transfer(STM32F429SPIState *s)
 
     // Deal with responding data pack
 
-    DB_PRINT("end time: %s\n", data_pack->end_time->str);
+    // DB_PRINT("end time: %s\n", data_pack->end_time->str);
     STM32F429SPIFifoEntry *e = g_new(STM32F429SPIFifoEntry, 1);
     e->timeout               = atoll(data_pack->end_time->str);
     if (data->miso_data && !qlist_empty(data->miso_data)) {
@@ -270,7 +271,7 @@ static void stm32f429_spi_transfer(STM32F429SPIState *s)
     DB_PRINT("curr time: %ld ns, new timeout at: %ld ns, with data %d\n", icount_get(), e->timeout, e->value);
     QTAILQ_INSERT_TAIL(&s->ppd_fifo_head, e, entries);
 
-    s->spi_dr = ssi_transfer(s->ssi, s->spi_dr);
+    // s->spi_dr_rx = ssi_transfer(s->ssi, s->spi_dr_tx);
 
     // DB_PRINT("SPI%s Data received: 0x%x, ASCII: %c\n", s->name, s->spi_dr, (char)s->spi_dr);
 }
@@ -282,8 +283,9 @@ static void transfer_callback(void *opaque)
     STM32F429SPIFifoEntry *e = QTAILQ_FIRST(&s->ppd_fifo_head);
     QTAILQ_REMOVE(&s->ppd_fifo_head, e, entries);
     DB_PRINT("callback called at: %ld ns, processing fifo data %d, ASCII: %c\n", icount_get(), e->value, (char)e->value);
-    s->spi_dr = e->value;
+    s->spi_dr_rx = e->value;
     s->spi_sr |= STM_SPI_SR_RXNE;
+    s->spi_sr |= STM_SPI_SR_TXE;
     DB_PRINT("SPI_DR and SPI_SR_RXNE updated\n");
     g_free(e);
     /* TODO: fetch next event in queue*/
@@ -306,8 +308,9 @@ static uint64_t stm32f429_spi_read(void *opaque, hwaddr addr, unsigned int size)
         return s->spi_sr;
     case STM_SPI_DR:
         // stm32f429_spi_transfer(s);
+        DB_PRINT("[%ld ns]: SPI%s read Data: 0x%x, ASCII: %c\n", icount_get(), s->name, s->spi_dr_rx, (char)s->spi_dr_rx);
         s->spi_sr &= ~STM_SPI_SR_RXNE;
-        return s->spi_dr;
+        return s->spi_dr_rx;
     case STM_SPI_CRCPR:
         qemu_log_mask(LOG_UNIMP,
                       "%s: CRC is not implemented, the registers "
@@ -379,7 +382,8 @@ static void stm32f429_spi_write(void *opaque, hwaddr addr, uint64_t val64,
          */
         return;
     case STM_SPI_DR:
-        s->spi_dr = value;
+        s->spi_dr_tx = value;
+        s->spi_sr &= ~STM_SPI_SR_TXE;
         stm32f429_spi_transfer(s);
         return;
     case STM_SPI_CRCPR:
@@ -430,7 +434,8 @@ static const VMStateDescription vmstate_stm32f429_spi = {
             VMSTATE_UINT32(spi_cr1, STM32F429SPIState),
             VMSTATE_UINT32(spi_cr2, STM32F429SPIState),
             VMSTATE_UINT32(spi_sr, STM32F429SPIState),
-            VMSTATE_UINT32(spi_dr, STM32F429SPIState),
+            VMSTATE_UINT32(spi_dr_tx, STM32F429SPIState),
+            VMSTATE_UINT32(spi_dr_rx, STM32F429SPIState),
             VMSTATE_UINT32(spi_crcpr, STM32F429SPIState),
             VMSTATE_UINT32(spi_rxcrcr, STM32F429SPIState),
             VMSTATE_UINT32(spi_txcrcr, STM32F429SPIState),

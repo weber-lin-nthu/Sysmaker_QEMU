@@ -31,9 +31,8 @@
 #include "hw/registerfields.h"
 #include "trace.h"
 
-#define HSE_DEFAULT_FRQ 48000000ULL
+#define HSE_DEFAULT_FRQ 26000000ULL
 #define HSI_FRQ         16000000ULL
-#define MSI_DEFAULT_FRQ 4000000ULL
 #define LSE_FRQ         32768ULL
 #define LSI_FRQ         32000ULL
 
@@ -365,6 +364,52 @@ static void pll_set_channel_divider(RccPllState *pll,
     pll_update(pll, false);
 }
 
+static int ppre_factor(int val)
+{
+    if (val < 0b100) {
+        return 1;
+    } else {
+        return 1 << (val - 0b11);
+    }
+}
+
+static void rcc_update_timpre(Stm32f429RccState *s)
+{
+    RccClockMux const TIMER_MUXS[] = {
+        RCC_CLOCK_MUX_TIM2,
+        RCC_CLOCK_MUX_TIM3,
+        RCC_CLOCK_MUX_TIM4,
+        RCC_CLOCK_MUX_TIM5,
+    };
+    int val           = FIELD_EX32(s->dckcfgr, DCKCFGR, TIMPRE);
+    int apb_prescaler = ppre_factor(FIELD_EX32(s->cfgr, CFGR, PPRE1));
+    if (val == 0) {
+        if (apb_prescaler == 1) {
+            for (int i = 0; i < ARRAY_SIZE(TIMER_MUXS); ++i) {
+                RccClockMux tim_mux = TIMER_MUXS[i];
+                clock_mux_set_factor(&s->clock_muxes[tim_mux], 1, 1);
+            }
+        } else {
+            for (int i = 0; i < ARRAY_SIZE(TIMER_MUXS); ++i) {
+                RccClockMux tim_mux = TIMER_MUXS[i];
+                clock_mux_set_factor(&s->clock_muxes[tim_mux], 2, 1);
+            }
+        }
+    } else if (val == 1) {
+        if (apb_prescaler == 1 || apb_prescaler == 2 || apb_prescaler == 4) {
+            for (int i = 0; i < ARRAY_SIZE(TIMER_MUXS); ++i) {
+                RccClockMux tim_mux = TIMER_MUXS[i];
+                clock_mux_set_factor(&s->clock_muxes[tim_mux], 1, 1);
+            }
+        } else {
+            for (int i = 0; i < ARRAY_SIZE(TIMER_MUXS); ++i) {
+                RccClockMux tim_mux = TIMER_MUXS[i];
+                clock_mux_set_factor(&s->clock_muxes[tim_mux], 4, 1);
+            }
+        }
+    }
+}
+
 static void rcc_update_irq(Stm32f429RccState *s)
 {
     /*
@@ -565,23 +610,16 @@ static void rcc_update_cfgr_register(Stm32f429RccState *s)
 
     /* PPRE2 */
     val = FIELD_EX32(s->cfgr, CFGR, PPRE2);
-    if (val < 0b100) {
-        clock_mux_set_factor(&s->clock_muxes[RCC_CLOCK_MUX_PCLK2],
-                             1, 1);
-    } else {
-        clock_mux_set_factor(&s->clock_muxes[RCC_CLOCK_MUX_PCLK2],
-                             1, 1 << (val - 0b11));
-    }
+    clock_mux_set_factor(&s->clock_muxes[RCC_CLOCK_MUX_PCLK2],
+                         1, ppre_factor(val));
 
     /* PPRE1 */
     val = FIELD_EX32(s->cfgr, CFGR, PPRE1);
-    if (val < 0b100) {
-        clock_mux_set_factor(&s->clock_muxes[RCC_CLOCK_MUX_PCLK1],
-                             1, 1);
-    } else {
-        clock_mux_set_factor(&s->clock_muxes[RCC_CLOCK_MUX_PCLK1],
-                             1, 1 << (val - 0b11));
-    }
+    clock_mux_set_factor(&s->clock_muxes[RCC_CLOCK_MUX_PCLK1],
+                         1, ppre_factor(val));
+
+    /* when updating PPRE1/2, TIMPRE might also be changed */
+    rcc_update_timpre(s);
 
     /* HPRE */
     val = FIELD_EX32(s->cfgr, CFGR, HPRE);
@@ -654,8 +692,8 @@ static void rcc_update_cfgr_register(Stm32f429RccState *s)
 #undef AHB3ENR_SET_ENABLE
 // }
 
-// static void rcc_update_apb1enr(Stm32f429RccState *s)
-// {
+static void rcc_update_apb1enr(Stm32f429RccState *s)
+{
 #define APB1ENR1_SET_ENABLE(_peripheral_name)                               \
     clock_mux_set_enable(&s->clock_muxes[RCC_CLOCK_MUX_##_peripheral_name], \
                          FIELD_EX32(s->apb1enr1, APB1ENR1, _peripheral_name##EN))
@@ -663,42 +701,42 @@ static void rcc_update_cfgr_register(Stm32f429RccState *s)
     clock_mux_set_enable(&s->clock_muxes[RCC_CLOCK_MUX_##_peripheral_name], \
                          FIELD_EX32(s->apb1enr2, APB1ENR2, _peripheral_name##EN))
 
-//     /* APB1ENR1 */
-//     APB1ENR1_SET_ENABLE(LPTIM1);
-//     APB1ENR1_SET_ENABLE(OPAMP);
-//     APB1ENR1_SET_ENABLE(DAC1);
-//     APB1ENR1_SET_ENABLE(PWR);
-//     /* CAN2: reserved for STM32F429 */
-//     APB1ENR1_SET_ENABLE(CAN1);
-//     /* CRSEN: reserved for STM32F429 */
-//     APB1ENR1_SET_ENABLE(I2C3);
-//     APB1ENR1_SET_ENABLE(I2C2);
-//     APB1ENR1_SET_ENABLE(I2C1);
-//     APB1ENR1_SET_ENABLE(UART5);
-//     APB1ENR1_SET_ENABLE(UART4);
-//     APB1ENR1_SET_ENABLE(USART3);
-//     APB1ENR1_SET_ENABLE(USART2);
-//     APB1ENR1_SET_ENABLE(SPI3);
-//     APB1ENR1_SET_ENABLE(SPI2);
-//     APB1ENR1_SET_ENABLE(WWDG);
-//     /* RTCAPB: reserved for STM32F429 */
-//     APB1ENR1_SET_ENABLE(LCD);
-//     APB1ENR1_SET_ENABLE(TIM7);
-//     APB1ENR1_SET_ENABLE(TIM6);
-//     APB1ENR1_SET_ENABLE(TIM5);
-//     APB1ENR1_SET_ENABLE(TIM4);
-//     APB1ENR1_SET_ENABLE(TIM3);
-//     APB1ENR1_SET_ENABLE(TIM2);
+    //     /* APB1ENR1 */
+    //     APB1ENR1_SET_ENABLE(LPTIM1);
+    //     APB1ENR1_SET_ENABLE(OPAMP);
+    //     APB1ENR1_SET_ENABLE(DAC1);
+    //     APB1ENR1_SET_ENABLE(PWR);
+    //     /* CAN2: reserved for STM32F429 */
+    //     APB1ENR1_SET_ENABLE(CAN1);
+    //     /* CRSEN: reserved for STM32F429 */
+    //     APB1ENR1_SET_ENABLE(I2C3);
+    //     APB1ENR1_SET_ENABLE(I2C2);
+    //     APB1ENR1_SET_ENABLE(I2C1);
+    //     APB1ENR1_SET_ENABLE(UART5);
+    //     APB1ENR1_SET_ENABLE(UART4);
+    //     APB1ENR1_SET_ENABLE(USART3);
+    //     APB1ENR1_SET_ENABLE(USART2);
+    //     APB1ENR1_SET_ENABLE(SPI3);
+    //     APB1ENR1_SET_ENABLE(SPI2);
+    //     APB1ENR1_SET_ENABLE(WWDG);
+    //     /* RTCAPB: reserved for STM32F429 */
+    //     APB1ENR1_SET_ENABLE(LCD);
+    //     APB1ENR1_SET_ENABLE(TIM7);
+    //     APB1ENR1_SET_ENABLE(TIM6);
+    APB1ENR1_SET_ENABLE(TIM5);
+    APB1ENR1_SET_ENABLE(TIM4);
+    APB1ENR1_SET_ENABLE(TIM3);
+    APB1ENR1_SET_ENABLE(TIM2);
 
-//     /* APB1ENR2 */
-//     APB1ENR2_SET_ENABLE(LPTIM2);
-//     APB1ENR2_SET_ENABLE(SWPMI1);
-//     /* I2C4EN: reserved for STM32F429 */
-//     APB1ENR2_SET_ENABLE(LPUART1);
+    //     /* APB1ENR2 */
+    //     APB1ENR2_SET_ENABLE(LPTIM2);
+    //     APB1ENR2_SET_ENABLE(SWPMI1);
+    //     /* I2C4EN: reserved for STM32F429 */
+    //     APB1ENR2_SET_ENABLE(LPUART1);
 
 #undef APB1ENR1_SET_ENABLE
 #undef APB1ENR2_SET_ENABLE
-// }
+}
 
 // static void rcc_update_apb2enr(Stm32f429RccState *s)
 // {
@@ -788,11 +826,13 @@ static void rcc_update_pllcfgr(Stm32f429RccState *s)
 
     /* PLLN */
     val = FIELD_EX32(s->pllcfgr, PLLCFGR, PLLN);
+    assert(50 <= val && val <= 432);
     pll_set_vco_multiplier(&s->plls[RCC_PLL_PLL], val);
 
     /* PLLM */
     val = FIELD_EX32(s->pllcfgr, PLLCFGR, PLLM);
-    clock_mux_set_factor(&s->clock_muxes[RCC_CLOCK_MUX_PLL_INPUT], 1, (val + 1));
+    assert(2 <= val && val <= 63);
+    clock_mux_set_factor(&s->clock_muxes[RCC_CLOCK_MUX_PLL_INPUT], 1, val);
 }
 
 // static void rcc_update_ccipr(Stm32f429RccState *s)
@@ -893,6 +933,18 @@ static void rcc_update_pllcfgr(Stm32f429RccState *s)
 //     rcc_update_irq(s);
 // }
 
+static void rcc_update_dckcfgr(Stm32f429RccState *s)
+{
+    /* update TIMPRE */
+    rcc_update_timpre(s);
+
+    /* TODO: SAI1BSRC */
+    /* TODO: SAI1ASRC */
+    /* TODO: PLLSAIDIVR */
+    /* TODO: PLLSAIDIVQ */
+    /* TODO: PLLI2SDIVQ */
+}
+
 static void stm32f429_rcc_reset_hold(Object *obj)
 {
     Stm32f429RccState *s = STM32F429_RCC(obj);
@@ -917,7 +969,7 @@ static void stm32f429_rcc_reset_hold(Object *obj)
     // s->ahb1enr     = 0x00000100;
     // s->ahb2enr     = 0x0;
     // s->ahb3enr     = 0x0;
-    // s->apb1enr1    = 0x0;
+    s->apb1enr1 = 0x0;
     // s->apb1enr2    = 0x0;
     // s->apb2enr     = 0x0;
     // s->ahb1smenr   = 0x00011303;
@@ -929,6 +981,7 @@ static void stm32f429_rcc_reset_hold(Object *obj)
     // s->ccipr       = 0x0;
     // s->bdcr        = 0x0;
     // s->csr         = 0x0C000600;
+    s->dckcfgr = 0x0;
 }
 
 static uint64_t stm32f429_rcc_read(void *opaque, hwaddr addr,
@@ -983,9 +1036,9 @@ static uint64_t stm32f429_rcc_read(void *opaque, hwaddr addr,
     // case A_AHB3ENR:
     //     retvalue = s->ahb3enr;
     //     break;
-    // case A_APB1ENR1:
-    //     retvalue = s->apb1enr1;
-    //     break;
+    case A_APB1ENR1:
+        retvalue = s->apb1enr1;
+        break;
     // case A_APB1ENR2:
     //     retvalue = s->apb1enr2;
     //     break;
@@ -1019,6 +1072,9 @@ static uint64_t stm32f429_rcc_read(void *opaque, hwaddr addr,
     // case A_CSR:
     //     retvalue = s->csr;
     //     break;
+    case A_DCKCFGR:
+        retvalue = s->dckcfgr;
+        break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
@@ -1109,10 +1165,10 @@ static void stm32f429_rcc_write(void *opaque, hwaddr addr,
     //     s->ahb3enr = value;
     //     rcc_update_ahb3enr(s);
     //     break;
-    // case A_APB1ENR1:
-    //     s->apb1enr1 = value;
-    //     rcc_update_apb1enr(s);
-    //     break;
+    case A_APB1ENR1:
+        s->apb1enr1 = value;
+        rcc_update_apb1enr(s);
+        break;
     // case A_APB1ENR2:
     //     s->apb1enr2 = value;
     //     rcc_update_apb1enr(s);
@@ -1164,6 +1220,10 @@ static void stm32f429_rcc_write(void *opaque, hwaddr addr,
     //     s->csr = value & ~CSR_READ_ONLY_MASK;
     //     rcc_update_csr(s);
     //     break;
+    case A_DCKCFGR:
+        s->dckcfgr = value;
+        rcc_update_dckcfgr(s);
+        break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: Bad offset 0x%" HWADDR_PRIx "\n", __func__, addr);
@@ -1290,7 +1350,7 @@ static const VMStateDescription vmstate_stm32f429_rcc = {
         // VMSTATE_UINT32(ahb1enr, Stm32f429RccState),
         // VMSTATE_UINT32(ahb2enr, Stm32f429RccState),
         // VMSTATE_UINT32(ahb3enr, Stm32f429RccState),
-        // VMSTATE_UINT32(apb1enr1, Stm32f429RccState),
+        VMSTATE_UINT32(apb1enr1, Stm32f429RccState),
         // VMSTATE_UINT32(apb1enr2, Stm32f429RccState),
         // VMSTATE_UINT32(apb2enr, Stm32f429RccState),
         // VMSTATE_UINT32(ahb1smenr, Stm32f429RccState),
@@ -1302,6 +1362,7 @@ static const VMStateDescription vmstate_stm32f429_rcc = {
         // VMSTATE_UINT32(ccipr, Stm32f429RccState),
         // VMSTATE_UINT32(bdcr, Stm32f429RccState),
         // VMSTATE_UINT32(csr, Stm32f429RccState),
+        VMSTATE_UINT32(dckcfgr, Stm32f429RccState),
         VMSTATE_CLOCK(hsi16_rc, Stm32f429RccState),
         VMSTATE_CLOCK(msi_rc, Stm32f429RccState),
         VMSTATE_CLOCK(hse, Stm32f429RccState),
@@ -1317,9 +1378,9 @@ static void stm32f429_rcc_realize(DeviceState *dev, Error **errp)
     size_t i;
 
     if (s->hse_frequency < 4000000ULL ||
-        s->hse_frequency > 48000000ULL) {
+        s->hse_frequency > 26000000ULL) {
         error_setg(errp,
-                   "HSE frequency is outside of the allowed [4-48]Mhz range: %" PRIx64 "",
+                   "HSE frequency is outside of the allowed [4-26]Mhz range: %" PRIx64 "",
                    s->hse_frequency);
         return;
     }

@@ -55,6 +55,7 @@ CPHA -> Clock phase
 #define STM_SPI_CR1_CPHA (1 << 0)
 
 #define STM_SPI_SR_RXNE (1 << 0)
+#define STM_SPI_SR_TXE  (1 << 1)
 
 #define TYPE_STM32F429_SPI "stm32f429-spi"
 OBJECT_DECLARE_SIMPLE_TYPE(STM32F429SPIState, STM32F429_SPI)
@@ -78,7 +79,8 @@ struct STM32F429SPIState {
     uint32_t spi_cr1;
     uint32_t spi_cr2;
     uint32_t spi_sr;
-    uint32_t spi_dr;
+    uint32_t spi_dr_tx;     // The data register is split into 2 buffers, write to the data register writes into the Tx buffer
+    uint32_t spi_dr_rx;     // and a read from the data register returns the value held in the Rx buffer
     uint32_t spi_crcpr;
     uint32_t spi_rxcrcr;
     uint32_t spi_txcrcr;

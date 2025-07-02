@@ -112,10 +112,10 @@ typedef enum RccClockMux {
     // RCC_CLOCK_MUX_LCD,
     // RCC_CLOCK_MUX_TIM7,
     // RCC_CLOCK_MUX_TIM6,
-    // RCC_CLOCK_MUX_TIM5,
-    // RCC_CLOCK_MUX_TIM4,
-    // RCC_CLOCK_MUX_TIM3,
-    // RCC_CLOCK_MUX_TIM2,
+    RCC_CLOCK_MUX_TIM5,
+    RCC_CLOCK_MUX_TIM4,
+    RCC_CLOCK_MUX_TIM3,
+    RCC_CLOCK_MUX_TIM2,
 
     // /* - APB2 */
     // RCC_CLOCK_MUX_TIM17,
@@ -206,7 +206,7 @@ struct Stm32f429RccState {
     // uint32_t ahb1enr;
     // uint32_t ahb2enr;
     // uint32_t ahb3enr;
-    // uint32_t apb1enr1;
+    uint32_t apb1enr1;
     // uint32_t apb1enr2;
     // uint32_t apb2enr;
     // uint32_t ahb1smenr;
@@ -218,6 +218,7 @@ struct Stm32f429RccState {
     // uint32_t ccipr;
     // uint32_t bdcr;
     // uint32_t csr;
+    uint32_t dckcfgr;
 
     /* Clock sources */
     Clock *gnd;

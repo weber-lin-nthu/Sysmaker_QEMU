@@ -51,7 +51,7 @@ static const int spi_irq[]  = {35, 36, 51, 84, 85, 86};
 static const int exti_irq[] = {6, 7, 8, 9, 10, 23, 23, 23,
                                23, 23, 40, 40, 40, 40, 40, 40};
 #define RCC_BASE_ADDRESS 0x40023800
-#define RCC_IRQ 5
+#define RCC_IRQ          5
 
 static const struct {
     uint32_t addr;
@@ -193,6 +193,14 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_mmio_map(busdev, 0, SYSCFG_ADD);
     sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, SYSCFG_IRQ));
 
+    /* RCC device */
+    busdev = SYS_BUS_DEVICE(&s->rcc);
+    if (!sysbus_realize(busdev, errp)) {
+        return;
+    }
+    sysbus_mmio_map(busdev, 0, RCC_BASE_ADDRESS);
+    sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, RCC_IRQ));
+
     /* Attach UART (uses USART registers) and USART controllers */
     for (i = 0; i < STM_NUM_USARTS; i++) {
         dev = DEVICE(&(s->usart[i]));
@@ -207,8 +215,18 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /* Timer 2 to 5 */
     for (i = 0; i < STM_NUM_TIMERS; i++) {
-        dev = DEVICE(&(s->timer[i]));
-        qdev_prop_set_uint64(dev, "clock-frequency", 1000000000);
+        g_autofree char *name = g_strdup_printf("%d", 2 + i);
+        dev               = DEVICE(&(s->timer[i]));
+        qdev_prop_set_string(dev, "name", name);
+        // uint64_t tim_freq = clock_get_hz(s->rcc.clock_muxes[RCC_CLOCK_MUX_TIM2].out);
+        // printf("%s: PCLK freq %ld\n", __FUNCTION__, tim_freq);
+        // qdev_prop_set_uint64(dev, "clock-frequency", tim_freq);
+        // qdev_prop_set_uint64(dev, "clock-frequency", 6250000);
+        g_free(name);
+        name = g_strdup_printf("tim%d-out", 2 + i);
+        G_GNUC_UNUSED Clock* bar = qdev_get_clock_out(DEVICE(&(s->rcc)), name);
+        qdev_connect_clock_in(dev, "clk",
+                              qdev_get_clock_out(DEVICE(&(s->rcc)), name));
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->timer[i]), errp)) {
             return;
         }
@@ -292,14 +310,6 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
         sysbus_mmio_map(busdev, 0, stm32f429_gpio_cfg[i].addr);
     }
 
-    /* RCC device */
-    busdev = SYS_BUS_DEVICE(&s->rcc);
-    if (!sysbus_realize(busdev, errp)) {
-        return;
-    }
-    sysbus_mmio_map(busdev, 0, RCC_BASE_ADDRESS);
-    sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, RCC_IRQ));
-
     // clang-format off
     create_unimplemented_device("timer[6]",    0x40001000, 0x400);
     create_unimplemented_device("timer[7]",    0x40001400, 0x400);
@@ -348,7 +358,6 @@ static void stm32f429_soc_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_device("RNG",         0x50060800, 0x400);
     // clang-format on
 
-    
     qemu_log("cortex-refclk-out: %ld ns\n", qdev_get_clock_out(DEVICE(&(s->rcc)), "cortex-refclk-out")->period);
     qemu_log("cortex-fclk-out: %ld ns\n", qdev_get_clock_out(DEVICE(&(s->rcc)), "cortex-fclk-out")->period);
 }
