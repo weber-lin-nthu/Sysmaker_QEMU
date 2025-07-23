@@ -47,12 +47,16 @@ type_init(sc_interface_config_register_types);
 
 static QDict *sc_data_to_dict(SCData *obj)
 {
-    return qdict_clone_shallow(obj->pin_value);
+    QDict *res = qdict_new();
+    if (obj->pin_value) {
+        qdict_put(res, "PinStates", obj->pin_value);
+    }
+    return res;
 }
 static void sc_data_from_dict(SCData *obj, QDict *d)
 {
-    if (d) {
-        obj->pin_value = qdict_clone_shallow(d);
+    if (d && qdict_get_qdict(d, "PinStates")) {
+        obj->pin_value = qdict_clone_shallow(qdict_get_qdict(d, "PinStates"));
     }
 }
 
@@ -113,10 +117,10 @@ static GString *scdatapack_to_json(SCDataPack *obj, bool pretty)
     QDict *data      = obj->data->to_dict(obj->data);
     QDict *data_pack = qdict_from_jsonf_nofail(
         "{"
-        "    'Pins': %p,"
-        "    'BeginTime': %s,"
-        "    'EndTime': %s,"
-        "    'Type': %s,"
+        "    'pins': %p,"
+        "    'beginTime': %s,"
+        "    'endTime': %s,"
+        "    'type': %s,"
         "    'Interface Configuration': %p,"
         "    'Data': %p"
         "}",
@@ -227,9 +231,25 @@ static void transport(PerifPinoutDeviceClass *klass, const char *perif_name, SCD
     }
     const QDict *pin_to_external_hw = klass->external_hw_pins.pin_to_external_hw;
     const QDict *external_hw_to_pin = klass->external_hw_pins.external_hw_to_pin;
-    QDict *pin_set                  = qdict_clone_shallow(qdict_get_qdict(klass->peripheral_pins, perif_name));
-    QDict *hw_set                   = qdict_new();
-    QDict *pin_value                = data_pack->data->pin_value;
+    if (qdict_get_qdict(klass->peripheral_pins, perif_name) == NULL)
+        return;
+    QDict *pin_set   = qdict_clone_shallow(qdict_get_qdict(klass->peripheral_pins, perif_name));
+    QDict *hw_set    = qdict_new();
+    QDict *pin_value = data_pack->data->pin_value;
+
+    // giving default pin values
+    for (const QDictEntry *it = qdict_first(pin_set); it;
+         it                   = qdict_next(pin_set, it)) {
+        const char *pin_name = qdict_entry_key(it);
+        if (!(qdict_entry_value(it) == NULL || g_strcmp0(qstring_get_str(qobject_to(QString, qdict_entry_value(it))), "General purpose output") == 0)) {
+            continue;
+        }
+        const char *cur_pin_val = qdict_get_try_str(klass->pin_value, pin_name);
+        if (!cur_pin_val) {
+            cur_pin_val = PERIF_PIN_DEFAULT_VAL;
+        }
+        qdict_put_str(pin_value, pin_name, cur_pin_val);
+    }
 
     g_string_printf(data_pack->begin_time, "%ld ns", icount_get()); // in nano second
 

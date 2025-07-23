@@ -84,7 +84,7 @@ static QDict *spi_ic_to_dict(SCInterfaceConfig *obj)
     } else {
         qdict_put_str(res, "Bit Order", "LSB");
     }
-    qdict_put_int(res, "Data Frame Size", ic->data_frame_size);
+    qdict_put_int(res, "Data Size", ic->data_frame_size);
     return res;
 }
 static void spi_ic_from_dict(SCInterfaceConfig *obj, QDict *d)
@@ -157,12 +157,15 @@ static QDict *spi_data_to_dict(SCData *obj)
 {
     SPIData *data = SPI_DATA(obj);
     QDict *res    = data->parent_to_dict(obj);
-    if (data->cs_data)
+    if (data->cs_data) {
         qdict_put(res, "CS", qlist_copy(data->cs_data));
-    if (data->mosi_data)
+    }
+    if (data->mosi_data) {
         qdict_put(res, "MOSI", qlist_copy(data->mosi_data));
-    if (data->miso_data)
+    }
+    if (data->miso_data) {
         qdict_put(res, "MISO", qlist_copy(data->miso_data));
+    }
     return res;
 }
 static void spi_data_from_dict(SCData *obj, QDict *d)
@@ -239,8 +242,8 @@ static void stm32f429_spi_transfer(STM32F429SPIState *s)
 {
     DB_PRINT("SPI%s Data to send: 0x%x, ASCII: %c\n", s->name, s->spi_dr_tx, (char)s->spi_dr_tx);
 
-    int CPOL = s->spi_cr1 & STM_SPI_CR1_CPOL;
-    int CPHA = s->spi_cr1 & STM_SPI_CR1_CPHA;
+    int CPOL = !!(s->spi_cr1 & STM_SPI_CR1_CPOL);
+    int CPHA = !!(s->spi_cr1 & STM_SPI_CR1_CPHA);
 
     g_autoptr(SCDataPack) data_pack = sc_datapack_new("SPI", TYPE_SPI_INTERFACE_CONFIG, TYPE_SPI_DATA);
     SPIInterfaceConfig *ic          = SPI_INTERFACE_CONFIG(data_pack->interface_config);
@@ -251,8 +254,9 @@ static void stm32f429_spi_transfer(STM32F429SPIState *s)
     ic->bit_order       = (s->spi_cr1 & (1u << 7)) ? LSB : MSB;
     ic->data_frame_size = (s->spi_cr1 & (1u << 11)) ? 16 : 8;
 
-    if (!data->mosi_data)
+    if (!data->mosi_data) {
         data->mosi_data = qlist_new();
+    }
     qlist_append_int(data->mosi_data, (uint16_t)s->spi_dr_tx);
 
     g_autofree char *perif_name = g_strdup_printf("SPI%s", s->name);

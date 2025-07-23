@@ -390,6 +390,10 @@ static void update_ppd_perif(STM32F429GpioState *s)
 static void update_ppd_pin_val(STM32F429GpioState *s)
 {
     PerifPinoutDeviceClass *k = PERIF_PINOUT_DEVICE_GET_CLASS(s->ppd);
+
+    g_autoptr(SCDataPack) data_pack = sc_datapack_new("PCB", TYPE_SC_INTERFACE_CONFIG, TYPE_SC_DATA);
+    g_autofree char *perif_name     = g_strdup_printf("GPIO%s", s->name);
+
     for (int pin_num = 0; pin_num < GPIO_NUM_PINS; ++pin_num) {
         g_autofree char *pin_name = g_strdup_printf("P%c%d", *s->name, pin_num);
         const char *value         = ((s->idr >> pin_num) & 0b1) ? "5V" : "0V";
@@ -399,6 +403,11 @@ static void update_ppd_pin_val(STM32F429GpioState *s)
     GString *setting = qobject_to_json_pretty(QOBJECT(k->pin_value), true);
     qemu_log("pin_value: \n%s\n", setting->str);
     g_string_free(setting, true);
+
+    // force initiate a transaction to update GPIO values
+    k->transport(k, perif_name, data_pack, data_pack);
+
+    qemu_log("gpio transaction done\n");
 }
 
 static void stm32f429_gpio_write(void *opaque, hwaddr addr, uint64_t val64,
